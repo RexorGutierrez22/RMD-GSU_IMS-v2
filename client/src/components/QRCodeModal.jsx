@@ -1,32 +1,33 @@
 import React, { useState } from 'react';
 import Modal from './Modal';
 
-const QRCodeModal = ({ isOpen, onClose, qrUrl, studentData }) => {
+const QRCodeModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, studentData }) => {
+  // Note: 'studentData' prop name is used for both student and employee data
   const [isSaved, setIsSaved] = useState(false);
 
   const handleDownload = async () => {
     try {
-      console.log('Attempting to download QR from:', qrUrl);
+      // Use download URL if available, otherwise fall back to display URL
+      const downloadUrl = qrDownloadUrl || qrUrl;
       
-      // Check if qrUrl is valid
-      if (!qrUrl) {
+      // Check if downloadUrl is valid
+      if (!downloadUrl) {
         throw new Error('QR URL is not available');
       }
 
-      const response = await fetch(qrUrl, {
+      const response = await fetch(downloadUrl, {
         method: 'GET',
         mode: 'cors'
       });
       
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
+      // Response received successfully
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const blob = await response.blob();
-      console.log('Blob size:', blob.size, 'Blob type:', blob.type);
+      // Process blob data
       
       if (blob.size === 0) {
         throw new Error('Downloaded file is empty');
@@ -49,7 +50,7 @@ const QRCodeModal = ({ isOpen, onClose, qrUrl, studentData }) => {
       window.URL.revokeObjectURL(url);
       setIsSaved(true);
       
-      console.log('Download successful');
+      // Download successful
     } catch (error) {
       console.error('Error downloading QR code:', error);
       alert(`Failed to download QR code: ${error.message}`);
@@ -133,11 +134,24 @@ const QRCodeModal = ({ isOpen, onClose, qrUrl, studentData }) => {
 
         {/* QR Code Display */}
         <div className="bg-gray-50 rounded-lg p-6 mb-6">
-          <img 
-            src={qrUrl} 
-            alt="Generated QR Code" 
-            className="mx-auto border border-gray-200 rounded-lg shadow-sm max-w-48"
-          />
+          {qrUrl ? (
+            <div className="text-center">
+              <img 
+                src={qrUrl} 
+                alt="Generated QR Code" 
+                className="mx-auto border border-gray-200 rounded-lg shadow-sm max-w-48"
+                onLoad={() => console.log('✅ QR Code loaded successfully')}
+                onError={(e) => {
+                  console.error('❌ QR Code failed to load:', qrUrl);
+                  console.error('Error details:', e);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="mx-auto border border-gray-200 rounded-lg shadow-sm max-w-48 h-48 flex items-center justify-center bg-gray-100">
+              <p className="text-gray-500 text-sm">QR Code not available</p>
+            </div>
+          )}
         </div>
 
         {/* Student/Employee Info */}

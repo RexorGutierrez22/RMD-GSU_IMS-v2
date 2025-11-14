@@ -13,11 +13,13 @@ class Student extends Model
         'first_name',
         'last_name',
         'middle_name',
-        'email',
         'student_id',
+        'email',
+        'contact_number',
         'course',
         'year_level',
-        'contact',
-        'qr_code_path'
+        'qr_code',
+        'qr_code_path',
+        'status'
     ];
 }

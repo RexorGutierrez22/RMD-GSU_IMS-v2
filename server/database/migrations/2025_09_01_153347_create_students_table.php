@@ -18,13 +18,24 @@ return new class extends Migration
             $table->string('first_name');
             $table->string('last_name');
             $table->string('middle_name')->nullable();
+            $table->string('student_id')->unique(); // ID number for students
             $table->string('email')->unique();
-            $table->string('student_id')->unique();
+            $table->string('contact_number'); // Contact field from form
+
+            // Student-specific fields
             $table->string('course');
             $table->string('year_level');
-            $table->string('contact');
+
+            // System generated fields
+            $table->string('qr_code')->unique()->nullable();
             $table->string('qr_code_path')->nullable();
+            $table->enum('status', ['active', 'inactive'])->default('active');
             $table->timestamps();
+
+            // Indexes
+            $table->index(['status']);
+            $table->index('qr_code');
+            $table->index('student_id');
         });
     }
 

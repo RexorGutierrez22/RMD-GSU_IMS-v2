@@ -17,7 +17,9 @@ class Employee extends Model
         'emp_id',
         'position',
         'department',
-        'contact',
-        'qr_code_path'
+        'contact_number',
+        'qr_code',
+        'qr_code_path',
+        'status'
     ];
 }

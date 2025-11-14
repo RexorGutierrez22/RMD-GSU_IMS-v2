@@ -1,13 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
 	AnalyticsDashboard,
 	BorrowersRequestDashboard,
 	BorrowedItemDashboard,
-	InventoryDashboard,
+	ReturnVerificationLounge,
+	ReturneeItemDashboard,
 	CalendarDashboard
 } from '../components/AdminDashboard';
 import Inventory from './Inventory.jsx';
+import ArchivesPage from './ArchivesPage.jsx';
+import SuperAdminAccess from './SuperAdminAccess.jsx';
+import DashboardErrorBoundary from '../components/DashboardErrorBoundary.jsx';
 
 const AdminDashboard = () => {
 	const navigate = useNavigate();
@@ -18,12 +22,47 @@ const AdminDashboard = () => {
 	const [expandedMenus, setExpandedMenus] = useState({ dashboard: true });
 	const [activeSubmenu, setActiveSubmenu] = useState('analytics');
 
+	// Listen for super admin logout events - but only for coordination, not forced logout
+	useEffect(() => {
+		const handleSuperAdminLogout = (event) => {
+			console.log('📡 AdminDashboard received super admin logout event:', event.detail);
+
+			// Only handle if this is specifically a super admin action that should affect regular admin
+			// For now, we don't force regular admin logout when super admin logs out
+			// This keeps the admin dashboard session independent
+			if (event.detail?.source === 'superadmin' && event.detail?.forceAdminLogout === true) {
+				// Clear all authentication data only if explicitly requested
+				localStorage.removeItem('admin_token');
+				localStorage.removeItem('admin_user');
+				localStorage.removeItem('token');
+				localStorage.removeItem('super_admin_access');
+				localStorage.removeItem('super_admin_info');
+				localStorage.removeItem('superAdminAuth');
+				localStorage.removeItem('superAdminUser');
+
+				// Navigate to admin login
+				navigate('/admin');
+			}
+		};
+
+		window.addEventListener('superAdminLogout', handleSuperAdminLogout);
+
+		return () => {
+			window.removeEventListener('superAdminLogout', handleSuperAdminLogout);
+		};
+	}, [navigate]);
+
 	useEffect(() => {
 		const token = localStorage.getItem('admin_token');
 		const adminUser = localStorage.getItem('admin_user');
-		
-		if (!token) {
-			console.log('No admin token found, redirecting to login');
+
+		// Check for Super Admin authentication as well
+		const superAdminToken = localStorage.getItem('admin_token');
+		const superAdminAccess = localStorage.getItem('super_admin_access');
+
+		if (!token && !superAdminToken && !superAdminAccess) {
+			// No admin token found, redirecting to login
+			console.log('No authentication token found, redirecting to admin login');
 			navigate('/admin');
 			return;
 		}
@@ -44,6 +83,15 @@ const AdminDashboard = () => {
 			if (adminUser) {
 				const userData = JSON.parse(adminUser);
 				setUser(userData);
+			} else if (superAdminAccess) {
+				// Use Super Admin info if available
+				const superAdminInfo = localStorage.getItem('super_admin_info');
+				if (superAdminInfo) {
+					const superAdminData = JSON.parse(superAdminInfo);
+					setUser({ name: superAdminData.full_name || 'Super Admin', email: superAdminData.email || 'admin@rmd.usep.edu.ph' });
+				} else {
+					setUser({ name: 'Super Admin', email: 'admin@rmd.usep.edu.ph' });
+				}
 			} else {
 				setUser({ name: 'Super Admin', email: 'admin@rmd.usep.edu.ph' });
 			}
@@ -51,7 +99,7 @@ const AdminDashboard = () => {
 			console.error('Error parsing admin user data:', err);
 			setUser({ name: 'Super Admin', email: 'admin@rmd.usep.edu.ph' });
 		}
-		
+
 		setLoading(false);
 	}, [navigate, searchParams]);
 
@@ -70,7 +118,20 @@ const AdminDashboard = () => {
 	};
 
 	const handleLogout = () => {
+		// Clear both regular admin and super admin tokens
 		localStorage.removeItem('admin_token');
+		localStorage.removeItem('admin_user');
+		localStorage.removeItem('token'); // Remove any other tokens
+		localStorage.removeItem('super_admin_access');
+		localStorage.removeItem('super_admin_info');
+		localStorage.removeItem('superAdminAuth');
+		localStorage.removeItem('superAdminUser');
+
+		// Broadcast logout to other components but specify this is from regular admin
+		window.dispatchEvent(new CustomEvent('adminLogout', {
+			detail: { reason: 'manual_logout', source: 'admin' }
+		}));
+
 		navigate('/admin');
 	};
 
@@ -90,20 +151,23 @@ const AdminDashboard = () => {
 				{ key: 'analytics', name: 'Analytics' },
 				{ key: 'borrowers-request', name: 'Borrowers Request' },
 				{ key: 'borrowed-item', name: 'Borrowed Item' },
+				{ key: 'return-verification', name: 'Return Verification' },
+				{ key: 'returnee-item', name: 'Returnee Item' },
 				{ key: 'inventory', name: 'Inventory' },
-				{ key: 'calendar', name: 'Calendar' }
+				{ key: 'calendar', name: 'Calendar' },
+				{ key: 'archives', name: 'Archives' }
 			]
 		},
 		{
 			key: 'user-access',
-			name: 'USER ACCESS',
+			name: 'SUPER ADMIN',
 			icon: (
 				<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z" />
+					<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
 				</svg>
 			),
 			type: 'single',
-			action: () => navigate('/users')
+			action: () => setActiveMenu('user-access')
 		},
 		{ label: 'SUPPORT', type: 'label' },
 		{
@@ -130,20 +194,35 @@ const AdminDashboard = () => {
 
 	// Render appropriate dashboard content based on active submenu
 	const renderDashboardContent = () => {
-		switch (activeSubmenu) {
-			case 'analytics':
-				return <AnalyticsDashboard />;
-			case 'borrowers-request':
-				return <BorrowersRequestDashboard />;
-			case 'borrowed-item':
-				return <BorrowedItemDashboard />;
-			case 'inventory':
-				return <Inventory />;
-			case 'calendar':
-				return <CalendarDashboard />;
-			default:
-				return <AnalyticsDashboard />;
-		}
+		const content = (() => {
+			switch (activeSubmenu) {
+				case 'analytics':
+					return <AnalyticsDashboard />;
+				case 'borrowers-request':
+					return <BorrowersRequestDashboard />;
+				case 'borrowed-item':
+					return <BorrowedItemDashboard />;
+				case 'return-verification':
+					return <ReturnVerificationLounge />;
+				case 'returnee-item':
+					return <ReturneeItemDashboard />;
+				case 'inventory':
+					console.log('Rendering MAIN Inventory component with fixed table structure');
+					return <Inventory key={`inventory-${Date.now()}`} standalone={true} />;
+				case 'calendar':
+					return <CalendarDashboard />;
+				case 'archives':
+					return <ArchivesPage />;
+				case 'user-access':
+					console.log("Rendering SuperAdminAccess component");
+					return <SuperAdminAccess />;
+				default:
+					return <AnalyticsDashboard />;
+			}
+		})();
+
+		// Wrap content with error boundary
+		return <DashboardErrorBoundary>{content}</DashboardErrorBoundary>;
 	};
 
 	if (loading) {
@@ -160,11 +239,11 @@ const AdminDashboard = () => {
 	return (
 		<div className="flex h-screen bg-gray-50">
 			{/* Sidebar */}
-			<div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} 
-				fixed inset-y-0 left-0 z-50 w-64 shadow-lg transform transition-transform duration-300 ease-in-out 
+			<div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+				fixed inset-y-0 left-0 z-50 w-64 shadow-lg transform transition-transform duration-300 ease-in-out
 				lg:relative lg:translate-x-0 ${sidebarOpen ? 'lg:block' : 'lg:hidden'}`}
 				style={{ backgroundColor: '#BA2C2C' }}>
-				
+
 				{/* Logo */}
 				<div className="flex flex-col items-center justify-center h-24 px-4 border-b border-red-800 bg-red-900 bg-opacity-30 relative">
 					{/* Close button for mobile */}
@@ -176,7 +255,7 @@ const AdminDashboard = () => {
 							<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
 						</svg>
 					</button>
-					
+
 					<div className="flex items-center mb-2">
 						<img src="/Usep_logo.png" alt="USeP Logo" className="h-10 w-10 mr-3 bg-white rounded-full p-1 shadow-md" />
 						<div className="text-center">
@@ -215,16 +294,16 @@ const AdminDashboard = () => {
 												{item.icon}
 												<span className="ml-3 font-medium">{item.name}</span>
 											</div>
-											<svg 
+											<svg
 												className={`w-4 h-4 transition-transform duration-200 ${expandedMenus[item.key] ? 'rotate-180' : ''}`}
-												fill="none" 
-												stroke="currentColor" 
+												fill="none"
+												stroke="currentColor"
 												viewBox="0 0 24 24"
 											>
 												<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
 											</svg>
 										</button>
-										
+
 										{expandedMenus[item.key] && (
 											<ul className="ml-4 mt-2 space-y-1">
 												{item.submenus.map((submenu, subIndex) => (
@@ -232,8 +311,8 @@ const AdminDashboard = () => {
 														<button
 															onClick={() => setActiveMenu(submenu.key)}
 															className={`w-full flex items-center px-4 py-2 text-left rounded-lg transition-colors duration-200 text-sm ${
-																activeSubmenu === submenu.key 
-																	? 'bg-white text-red-600 shadow-sm font-medium' 
+																activeSubmenu === submenu.key
+																	? 'bg-white text-red-600 shadow-sm font-medium'
 																	: 'text-red-100 hover:bg-red-800 hover:bg-opacity-50 hover:text-white'
 															}`}
 														>
@@ -269,6 +348,17 @@ const AdminDashboard = () => {
 
 				{/* User Profile */}
 				<div className="absolute bottom-0 left-0 right-0 p-6 border-t border-red-800">
+					{/* Session Status Indicator */}
+					<div className="mb-3 px-3 py-2 bg-red-800/30 rounded-lg border border-red-700/50">
+						<div className="flex items-center justify-center">
+							<div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+							<span className="text-xs text-red-100 font-medium">Admin Session Active</span>
+						</div>
+						<div className="text-center mt-1">
+							<span className="text-xs text-red-200">No auto-logout for admin users</span>
+						</div>
+					</div>
+
 					<div className="flex items-center justify-between">
 						<div className="flex items-center">
 							<div className="w-10 h-10 bg-white rounded-full flex items-center justify-center">
@@ -299,9 +389,10 @@ const AdminDashboard = () => {
 				{/* Header with toggle and mobile menu button - Top 30% Red Bottom 70% White */}
 				<div className="relative shadow-sm border-b border-gray-200 p-4 flex items-center justify-between"
 					style={{
-						background: 'linear-gradient(to bottom, #BA2C2C 30%, white 30%)'
+						background: 'linear-gradient(to bottom, #BA2C2C 25%, white 25%)',
+						minHeight: '100px'
 					}}>
-					<div className="flex items-center space-x-4 relative z-10 mt-3">
+					<div className="flex items-center space-x-4 relative z-10 mt-6">
 						{/* Desktop Toggle Button */}
 						<button
 							onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -312,7 +403,7 @@ const AdminDashboard = () => {
 								<path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
 							</svg>
 						</button>
-						
+
 						{/* Mobile Menu Button */}
 						<button
 							onClick={() => setSidebarOpen(true)}
@@ -324,17 +415,34 @@ const AdminDashboard = () => {
 							</svg>
 						</button>
 					</div>
-					
+
 					{/* Header Title */}
-					<div className="flex-1 text-center">
+					<div className="flex-1 text-center mt-6">
 						<h1 className="text-lg font-semibold text-gray-800 capitalize">
-							{activeSubmenu.replace('-', ' ')}
+							{activeSubmenu === 'user-access' ? '' : activeSubmenu.replace('-', ' ')}
 						</h1>
 					</div>
-					
+
 					{/* Header Actions */}
-					<div className="flex items-center space-x-2">
-						<button 
+					<div className="flex items-center space-x-4 mt-6">
+						{/* User Greeting */}
+						<div className="flex items-center space-x-3">
+							<div className="text-right">
+								<div className="text-sm font-medium text-gray-800">
+									Hello, {user?.full_name || user?.name || 'Rexor Gutierrez'}!
+								</div>
+								<div className="text-xs text-gray-500">
+									{user?.email || 'rexgutierrezva@usep.edu.ph'}
+								</div>
+							</div>
+							<div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+								<svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+								</svg>
+							</div>
+						</div>
+
+						<button
 							onClick={() => {
 								window.scrollTo({
 									top: document.body.scrollHeight,
@@ -346,6 +454,15 @@ const AdminDashboard = () => {
 						>
 							<svg className="w-5 h-5 transition-transform duration-300 group-hover:translate-y-1 group-active:translate-y-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5-5-5h5V2h0z" />
+							</svg>
+						</button>
+						<button
+							onClick={handleLogout}
+							className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+							title="Logout"
+						>
+							<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
 							</svg>
 						</button>
 						<button className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
@@ -365,7 +482,7 @@ const AdminDashboard = () => {
 
 			{/* Mobile Sidebar Overlay */}
 			{sidebarOpen && (
-				<div 
+				<div
 					className="fixed inset-0 z-40 bg-black bg-opacity-50 lg:hidden"
 					onClick={() => setSidebarOpen(false)}
 				></div>

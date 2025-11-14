@@ -1,0 +1,62 @@
+# VS Code Performance Optimization - Ignore unnecessary files from indexing
+
+# Node modules (large folder with thousands of files)
+**/node_modules/**
+**/node_modules
+
+# Vendor folder (Laravel dependencies - thousands of files)
+**/vendor/**
+**/vendor
+
+# Build outputs
+**/dist/**
+**/build/**
+**/.next/**
+
+# Cache directories
+**/.cache/**
+**/storage/framework/cache/**
+**/storage/framework/sessions/**
+**/storage/framework/views/**
+**/storage/logs/**
+
+# Compiled files
+**/*.min.js
+**/*.min.css
+**/*.map
+
+# Package manager lock files (very large)
+**/package-lock.json
+**/yarn.lock
+**/composer.lock
+
+# Git folder
+**/.git/**
+
+# OS files
+**/.DS_Store
+**/Thumbs.db
+**/desktop.ini
+
+# Temporary files
+**/*.tmp
+**/*.temp
+**/.temp/**
+
+# Documentation (can be excluded from indexing)
+**/*.md.backup
+**/BACKUP-*.md
+
+# Test files (if not actively developing)
+# **/*test*.php
+# **/*Test*.jsx
+
+# QR code images
+**/qr_codes/**/*.svg
+**/qr_codes/**/*.png
+
+# Large documentation files
+**/COMPLETE-*.md
+**/CSP-*.md
+**/CAMERA-*.md
+**/QR-CODE-*.md

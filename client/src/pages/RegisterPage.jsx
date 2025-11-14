@@ -1,13 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header.jsx';
-import Footer from '../components/Footer.jsx';
 
 const RegisterPage = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray- relative overflow-hidden">
+    <div className="min-h-screen flex flex-col bg-gray-50 relative overflow-hidden">
       {/* Background image full-screen via img ensures loading */}
       <div
         className="absolute inset-0 z-0"
@@ -22,18 +21,12 @@ const RegisterPage = () => {
       {/* Optional overlay for readability */}
       <div className="absolute inset-0 bg-white opacity-60 z-0"></div>
 
-      {/* Global Header with custom title and Back button on the right */}
+      {/* Global Header with clickable branding */}
       <div className="relative z-20">
         <Header
-          title="Registration"
-          rightContent={
-            <button
-              className="back-btn"
-              onClick={() => navigate('/')}
-            >
-              Back
-            </button>
-          }
+          title="Resource Management Division"
+          subtitle="Registration Portal"
+          onTitleClick={() => navigate('/')}
         />
       </div>
 
@@ -50,10 +43,6 @@ const RegisterPage = () => {
       </main>
 
 
-      {/* Global Footer */}
-      <div className="relative z-20">
-        <Footer />
-      </div>
     </div>
   );
 };

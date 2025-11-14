@@ -22,9 +22,18 @@ return new class extends Migration
             $table->string('emp_id')->unique();
             $table->string('position');
             $table->string('department');
-            $table->string('contact');
+            $table->string('contact_number'); // Contact field from form
+
+            // System generated fields
+            $table->string('qr_code')->unique()->nullable();
             $table->string('qr_code_path')->nullable();
+            $table->enum('status', ['active', 'inactive'])->default('active');
             $table->timestamps();
+
+            // Indexes
+            $table->index(['status']);
+            $table->index('qr_code');
+            $table->index('emp_id');
         });
     }
 

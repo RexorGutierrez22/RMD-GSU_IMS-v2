@@ -1,0 +1,192 @@
+# ========================================
+# RMD-GSU IMS - PERMANENT GITIGNORE
+# PREVENTS FILE RESTORATION
+# ========================================
+
+# ============================================
+# NODE MODULES & DEPENDENCIES (CRITICAL!)
+# ============================================
+**/node_modules/
+node_modules/
+client/node_modules/
+server/node_modules/
+**/vendor/
+vendor/
+server/vendor/
+
+# ============================================
+# BUILD & DIST FILES
+# ============================================
+**/dist/
+**/build/
+dist/
+build/
+client/dist/
+client/build/
+
+# ============================================
+# LOGS - ALL LOG FILES (PERMANENT IGNORE)
+# ============================================
+*.log
+**/*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+server/storage/logs/*.log
+server/storage/logs/*
+storage/logs/
+
+# ============================================
+# ENVIRONMENT FILES
+# ============================================
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+server/.env
+client/.env
+
+# ============================================
+# CACHE & TEMPORARY FILES
+# ============================================
+.cache/
+*.cache
+.temp/
+tmp/
+temp/
+*.tmp
+server/storage/framework/cache/
+server/storage/framework/sessions/
+server/storage/framework/views/
+server/bootstrap/cache/
+storage/framework/cache/
+storage/framework/sessions/
+storage/framework/views/
+bootstrap/cache/
+
+# ============================================
+# QR CODES (GENERATED FILES)
+# ============================================
+**/qr_codes/
+qr_codes/
+server/public/qr_codes/
+public/qr_codes/
+*.qr.svg
+*.qr.png
+
+# ============================================
+# TEST FILES (PERMANENT IGNORE!)
+# ============================================
+**/*test*.php
+**/*test*.js
+**/*test*.jsx
+**/*test*.html
+**/*Test*.php
+**/*Test*.js
+**/*Test*.jsx
+**/test_*.php
+**/test_*.js
+**/test_*.html
+**/*_test.php
+**/*_test.js
+test.php
+test.js
+test.html
+check_*.php
+fix_*.php
+tinker_*.php
+server/test*.php
+server/test*.html
+server/check_*.php
+server/fix_*.php
+client/src/App-test.jsx
+client/src/AppTest.jsx
+client/src/AppFixed.jsx
+client/src/SimpleApp.jsx
+client/src/TestComponent.jsx
+
+# ============================================
+# BACKUP & OLD FILES (PERMANENT IGNORE!)
+# ============================================
+**/backup/
+**/old/
+**/*.backup
+**/*.old
+**/*.bak
+*-backup.*
+*-old.*
+backup/
+old/
+
+# ============================================
+# DOCUMENTATION (GUIDE/FIX FILES)
+# ============================================
+CAMERA-SCANNER-FIX.md
+CSP-CAMERA-FIX.md
+CSP-FIX-SUMMARY.md
+COMPLETE-TESTING-GUIDE.md
+QR-CODE-FIX-*.md
+*-FIX-*.md
+*-GUIDE.md
+TROUBLESHOOTING*.md
+USER-ACCESS-FIX.md
+troubleshooting-guide.md
+
+# ============================================
+# SCRIPTS (TEMPORARY/TEST SCRIPTS)
+# ============================================
+test-*.ps1
+fix-*.ps1
+cleanup-*.ps1
+*.ps1.backup
+
+# ============================================
+# IDE & EDITOR
+# ============================================
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ============================================
+# SYSTEM FILES
+# ============================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# ============================================
+# LARAVEL SPECIFIC
+# ============================================
+storage/*.key
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+
+# ============================================
+# REACT/VITE SPECIFIC
+# ============================================
+.vite/
+vite.config.js.timestamp-*
+
+# ============================================
+# MEDIA & ASSETS
+# ============================================
+server/public/storage
+storage/app/public

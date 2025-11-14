@@ -1,0 +1,198 @@
+{
+  // ========================================
+  // RMD-GSU IMS - ANTI-LAG OPTIMIZED SETTINGS
+  // PREVENTS FILE RESTORATION
+  // ========================================
+
+  // ========================================
+  // GIT SETTINGS - DISABLE TO PREVENT RESTORE
+  // ========================================
+  "git.enabled": false,
+  "git.autorefresh": false,
+  "git.autofetch": false,
+  "git.autoStash": false,
+  "git.confirmSync": false,
+  "git.enableSmartCommit": false,
+  "git.postCommitCommand": "none",
+  "git.fetchOnPull": false,
+  "git.pruneOnFetch": false,
+  "git.showProgress": false,
+  "git.ignoreLegacyWarning": true,
+  "git.ignoreRebaseWarning": true,
+  "git.ignoreMissingGitWarning": true,
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/vendor/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/.git/**": true,
+    "**/storage/framework/cache/**": true,
+    "**/storage/framework/sessions/**": true,
+    "**/storage/framework/views/**": true,
+    "**/storage/logs/**": true,
+    "**/qr_codes/**": true,
+    "**/*.log": true,
+    "**/.history/**": true,
+    "**/backup/**": true,
+    "**/tmp/**": true,
+    "**/old/**": true,
+    "**/.vscode-test/**": true
+  },
+
+  // Search exclusions (faster search results)
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/vendor": true,
+    "**/dist": true,
+    "**/build": true,
+    "**/.git": true,
+    "**/storage/framework": true,
+    "**/storage/logs": true,
+    "**/qr_codes": true,
+    "**/*.min.js": true,
+    "**/*.min.css": true,
+    "**/*.map": true,
+    "**/package-lock.json": true,
+    "**/composer.lock": true,
+    "**/docs/**": false,
+    "**/tests/**": true,
+    "**/.history/**": true,
+    "**/backup/**": true
+  },
+
+  // File exclusions from explorer (cleaner sidebar)
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/desktop.ini": true,
+    "**/*.log": true,
+    "**/node_modules": true,
+    "**/vendor": true,
+    "**/qr_codes": true,
+    "**/.history": true,
+    "**/backup": true,
+    "**/old": true
+  },
+
+  // Disable unnecessary features for performance
+  "editor.minimap.enabled": false, // Minimap uses memory
+  "editor.codeLens": false, // CodeLens can slow down editor
+  "editor.renderWhitespace": "selection", // Only show when selecting
+  "editor.occurrencesHighlight": "singleFile", // Keep this for coding
+  "editor.selectionHighlight": true,
+  "editor.renderLineHighlight": "line",
+  "editor.semanticHighlighting.enabled": false, // Disable semantic highlighting for performance
+  "editor.bracketPairColorization.enabled": false,
+
+  // Optimize IntelliSense
+  "editor.quickSuggestions": {
+    "other": true,
+    "comments": false, // Disable in comments
+    "strings": true
+  },
+  "editor.suggestOnTriggerCharacters": true,
+  "editor.acceptSuggestionOnCommitCharacter": true,
+  "editor.snippetSuggestions": "top",
+  "editor.wordBasedSuggestions": "off", // Reduce memory usage
+
+  // TypeScript server tuning (reduce overhead)
+  "typescript.tsserver.maxTsServerMemory": 4096,
+  "typescript.disableAutomaticTypeAcquisition": true,
+  "typescript.suggest.enabled": true,
+  "javascript.suggest.enabled": true,
+
+  // Disable IDE features that cause heavy background work
+  "files.autoSave": "onFocusChange",
+  "editor.formatOnSave": false, // Set to true if you want auto-format
+  "editor.defaultFormatter": null,
+
+  // Formatter per-language
+  "[javascript]": {
+    "editor.defaultFormatter": null
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": null
+  },
+  "[php]": {
+    "editor.defaultFormatter": null
+  },
+
+  // Git performance
+  "git.enabled": true, // Disable Git integration for workspace to reduce load (enable when needed)
+  "git.autorefresh": false, // Disable auto-refresh for performance
+  "git.decorations.enabled": false,
+
+  // Terminal settings
+  "terminal.integrated.scrollback": 1000, // Reduce scrollback buffer
+
+  // Extensions optimization
+  "extensions.autoUpdate": false, // Manual updates
+  "extensions.autoCheckUpdates": false,
+  "extensions.ignoreRecommendations": true,
+
+  // Emmet settings (faster HTML/JSX)
+  "emmet.includeLanguages": {
+    "javascript": "javascriptreact",
+    "typescript": "typescriptreact"
+  },
+
+  // Breadcrumbs (optional - can disable for more performance)
+  "breadcrumbs.enabled": false,
+
+  // Telemetry (disable for slight performance gain)
+  "telemetry.telemetryLevel": "off",
+
+  // Files to trim trailing whitespace
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+
+  // Project-specific settings
+  "eslint.workingDirectories": [
+    "./client"
+  ],
+
+  // PHP Intelephense settings (if using)
+  "intelephense.files.exclude": [
+    "**/vendor/**",
+    "**/node_modules/**",
+    "**/storage/**",
+    "**/bootstrap/cache/**"
+  ],
+
+  // Disable preview mode (open files directly)
+  "workbench.editor.enablePreview": false,
+
+  // Limit number of open editors
+  "workbench.editor.limit.enabled": true,
+  "workbench.editor.limit.value": 8,
+
+  // Startup settings
+  "window.restoreWindows": "one", // Only restore one window on startup
+  "workbench.startupEditor": "none",
+
+  // File icon theme (lighter theme = better performance)
+  "workbench.iconTheme": "material-icon-theme",
+
+  // Compact folders in explorer
+  "explorer.compactFolders": true,
+
+  // Reduce workspace symbol search depth
+  "search.maxResults": 2000,
+  "search.followSymlinks": false,
+  "search.useIgnoreFiles": true,
+  "search.useGlobalIgnoreFiles": true,
+
+  // Explorer behavior
+  "explorer.autoReveal": false,
+
+  // Disable heavy language features
+  "css.validate": true,
+  "scss.validate": true,
+  "less.validate": true,
+
+  // Hide large asset folders from explorer by default
+  "files.excludePatterns": {
+    "**/public/qr_codes/**": true
+  }
+}

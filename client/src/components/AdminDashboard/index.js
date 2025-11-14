@@ -17,6 +17,7 @@ export { default as RecentTransactionsTable } from './RecentTransactionsTable';
 // Dashboard Views
 export { default as BorrowersRequestDashboard } from './BorrowersRequestDashboard';
 export { default as BorrowedItemDashboard } from './BorrowedItemDashboard';
+export { default as ReturnVerificationLounge } from './ReturnVerificationLounge';
 export { default as InventoryDashboard } from './InventoryDashboard';
 export { default as CalendarDashboard } from './CalendarDashboard';
 export { default as ReturneeItemDashboard } from './ReturneeItemDashboard';

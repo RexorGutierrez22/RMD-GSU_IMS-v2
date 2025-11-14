@@ -14,11 +14,21 @@ class DatabaseSeeder extends Seeder
      */
     public function run()
     {
-        // \App\Models\User::factory(10)->create();
+        // Seed the inventory management system with separate user tables
+        $this->call([
+            StudentsSeeder::class,
+            EmployeesSeeder::class,
+            AdminSeeder::class,
+            SuperAdminSeeder::class,
+            InventoryItemSeeder::class,
+        ]);
 
-        // \App\Models\User::factory()->create([
-        //     'name' => 'Test User',
-        //     'email' => 'test@example.com',
-        // ]);
+        $this->command->info('All database tables seeded successfully!');
+        $this->command->info('=== Default Login Credentials ===');
+        $this->command->info('Students: Check students table for sample data');
+        $this->command->info('Employees: Check employees table for sample data');
+        $this->command->info('Admin: Username=Rexor22, Password=rmd@admin');
+        $this->command->info('Admin: Username=RMD_Staff, Password=rmd@admin');
+        $this->command->info('SuperAdmin: Username=rmd_superadmin, Password=rmd@superadmin');
     }
 }

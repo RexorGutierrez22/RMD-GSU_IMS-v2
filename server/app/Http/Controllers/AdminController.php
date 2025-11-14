@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use App\Models\Admin;
+use App\Models\AdminRegistration;
 use Illuminate\Validation\ValidationException;
 
 class AdminController extends Controller
@@ -193,6 +194,36 @@ class AdminController extends Controller
 
         return response()->json([
             'message' => 'Admin deleted successfully'
+        ]);
+    }
+
+    /**
+     * Get all approved admins with full details (for Admin/Staff Management tab)
+     */
+    public function getApprovedAdmins()
+    {
+        // Fetch approved admin/staff from admin_registrations table where requested_role is 'Admin' or 'Staff'
+        $admins = AdminRegistration::select([
+            'id',
+            'full_name',
+            'email',
+            'username',
+            'department',
+            'position',
+            'contact_number',
+            'requested_role as role',
+            'status',
+            'created_at',
+            'updated_at'
+        ])
+        ->where('status', 'Approved')
+        ->whereIn('requested_role', ['Admin', 'Staff'])
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $admins
         ]);
     }
 }

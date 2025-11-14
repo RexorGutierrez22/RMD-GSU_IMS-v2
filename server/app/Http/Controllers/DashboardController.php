@@ -5,7 +5,11 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Student;
 use App\Models\Employee;
+use App\Models\Admin;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Auth;
 
 class DashboardController extends Controller
 {
@@ -84,34 +88,80 @@ class DashboardController extends Controller
     public function getStudentsCount()
     {
         try {
+            // Add debugging
+            \Log::info('Students count endpoint called');
+
             $count = Student::count();
-            return response()->json([
+            \Log::info('Students count: ' . $count);
+
+            $response = response()->json([
                 'count' => $count,
-                'total' => $count
+                'total' => $count,
+                'debug' => 'Students count fetched successfully'
             ]);
+
+            // Add CORS headers manually
+            $response->headers->set('Access-Control-Allow-Origin', '*');
+            $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+            return $response;
+
         } catch (\Exception $e) {
-            return response()->json([
+            \Log::error('Students count error: ' . $e->getMessage());
+
+            $response = response()->json([
                 'error' => 'Failed to fetch students count',
                 'message' => $e->getMessage(),
                 'count' => 0
             ], 500);
+
+            // Add CORS headers to error response too
+            $response->headers->set('Access-Control-Allow-Origin', '*');
+            $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+            return $response;
         }
     }
 
     public function getEmployeesCount()
     {
         try {
+            // Add debugging
+            \Log::info('Employees count endpoint called');
+
             $count = Employee::count();
-            return response()->json([
+            \Log::info('Employees count: ' . $count);
+
+            $response = response()->json([
                 'count' => $count,
-                'total' => $count
+                'total' => $count,
+                'debug' => 'Employees count fetched successfully'
             ]);
+
+            // Add CORS headers manually
+            $response->headers->set('Access-Control-Allow-Origin', '*');
+            $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+            return $response;
+
         } catch (\Exception $e) {
-            return response()->json([
+            \Log::error('Employees count error: ' . $e->getMessage());
+
+            $response = response()->json([
                 'error' => 'Failed to fetch employees count',
                 'message' => $e->getMessage(),
                 'count' => 0
             ], 500);
+
+            // Add CORS headers to error response too
+            $response->headers->set('Access-Control-Allow-Origin', '*');
+            $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+            return $response;
         }
     }
 
@@ -133,6 +183,221 @@ class DashboardController extends Controller
                 'borrowed_items' => 0,
                 'low_stock_items' => 0,
                 'available_items' => 0
+            ], 500);
+        }
+    }
+
+    public function authenticateSuperAdmin(Request $request)
+    {
+        try {
+            // Add more detailed logging
+            \Log::info('=== SuperAdmin Authentication Debug ===');
+            \Log::info('Request data: ', $request->all());
+
+            $credentials = $request->validate([
+                'username' => 'required|string',
+                'password' => 'required|string'
+            ]);
+
+            \Log::info('SuperAdmin authentication attempt', ['username' => $credentials['username']]);
+            \Log::info('Looking for username in superadmin table...');
+
+            // Check if superadmin table exists first
+            if (!Schema::hasTable('superadmin')) {
+                \Log::error('SuperAdmin table does not exist!');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'System configuration error: SuperAdmin table not found'
+                ], 500);
+            }
+
+            // Direct database query for superadmin authentication
+            $superAdmin = DB::table('superadmin')->where('username', $credentials['username'])->first();
+            \Log::info('Database query result: ', $superAdmin ? ['found' => true, 'username' => $superAdmin->username] : ['found' => false]);
+
+            if (!$superAdmin) {
+                \Log::warning('SuperAdmin not found', ['username' => $credentials['username']]);
+
+                // Check if there are any superadmin records at all
+                $adminCount = DB::table('superadmin')->count();
+                \Log::info('Total superadmin records in database: ' . $adminCount);
+
+                $response = response()->json([
+                    'success' => false,
+                    'message' => 'Invalid credentials'
+                ], 401);
+
+                // Add CORS headers
+                $response->headers->set('Access-Control-Allow-Origin', '*');
+                $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+                $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+                return $response;
+            }
+
+            // Check password
+            \Log::info('Checking password for user: ' . $superAdmin->username);
+            \Log::info('Password hash from DB: ' . substr($superAdmin->password, 0, 20) . '...');
+            \Log::info('Input password: ' . $credentials['password']);
+
+            if (!Hash::check($credentials['password'], $superAdmin->password)) {
+                \Log::warning('SuperAdmin password mismatch', [
+                    'username' => $credentials['username'],
+                    'provided_password' => $credentials['password'],
+                    'hash_from_db' => substr($superAdmin->password, 0, 20) . '...'
+                ]);
+
+                $response = response()->json([
+                    'success' => false,
+                    'message' => 'Invalid credentials'
+                ], 401);
+
+                // Add CORS headers
+                $response->headers->set('Access-Control-Allow-Origin', '*');
+                $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+                $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+                return $response;
+            }
+
+            \Log::info('SuperAdmin authentication successful', ['username' => $credentials['username']]);
+
+            // Authentication successful
+            $response = response()->json([
+                'success' => true,
+                'message' => 'Authentication successful',
+                'admin' => [
+                    'id' => $superAdmin->id,
+                    'username' => $superAdmin->username,
+                    'full_name' => $superAdmin->full_name,
+                    'email' => $superAdmin->email
+                ]
+            ]);
+
+            // Add CORS headers
+            $response->headers->set('Access-Control-Allow-Origin', '*');
+            $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+            return $response;
+
+        } catch (\Exception $e) {
+            \Log::error('SuperAdmin authentication error', ['error' => $e->getMessage()]);
+
+            $response = response()->json([
+                'success' => false,
+                'message' => 'Authentication failed',
+                'error' => $e->getMessage()
+            ], 500);
+
+            // Add CORS headers to error response too
+            $response->headers->set('Access-Control-Allow-Origin', '*');
+            $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+            return $response;
+        }
+    }
+
+    public function getAllStudents()
+    {
+        try {
+            $students = Student::select([
+                'id',
+                'first_name',
+                'last_name',
+                'student_id',
+                'email',
+                'course',
+                'year_level',
+                'contact',
+                'created_at'
+            ])->get()->map(function ($student) {
+                return [
+                    'id' => 'STU-' . str_pad($student->id, 3, '0', STR_PAD_LEFT),
+                    'firstName' => $student->first_name,
+                    'lastName' => $student->last_name,
+                    'studentId' => $student->student_id,
+                    'email' => $student->email,
+                    'course' => $student->course,
+                    'yearLevel' => $student->year_level,
+                    'contact' => $student->contact,
+                    'status' => 'Active', // You can add this field to the database if needed
+                    'registeredDate' => $student->created_at->toISOString()
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $students
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch students',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getAllEmployees()
+    {
+        try {
+            // Check if category column exists in the employees table
+            $columns = Schema::getColumnListing('employees');
+            $selectColumns = [
+                'id',
+                'first_name',
+                'last_name',
+                'emp_id',
+                'email',
+                'position',
+                'department',
+                'contact',
+                'created_at'
+            ];
+
+            // Add category only if it exists
+            if (in_array('category', $columns)) {
+                $selectColumns[] = 'category';
+            }
+
+            $employees = Employee::select($selectColumns)->get()->map(function ($employee) use ($columns) {
+                $mappedEmployee = [
+                    'id' => 'EMP-' . str_pad($employee->id, 3, '0', STR_PAD_LEFT),
+                    'firstName' => $employee->first_name,
+                    'lastName' => $employee->last_name,
+                    'employeeId' => $employee->emp_id,
+                    'email' => $employee->email,
+                    'department' => $employee->department,
+                    'position' => $employee->position,
+                    'contact' => $employee->contact,
+                    'status' => 'Active', // You can add this field to the database if needed
+                    'registeredDate' => $employee->created_at->toISOString()
+                ];
+
+                // Add category only if it exists
+                if (in_array('category', $columns)) {
+                    $mappedEmployee['category'] = $employee->category;
+                } else {
+                    // Default value if category doesn't exist
+                    $mappedEmployee['category'] = 'Staff';
+                }
+
+                return $mappedEmployee;
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $employees
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch employees',
+                'error' => $e->getMessage()
             ], 500);
         }
     }

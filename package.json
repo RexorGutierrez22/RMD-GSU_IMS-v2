@@ -1,0 +1,37 @@
+{
+  "name": "rmd-gsu-ims",
+  "version": "1.0.0",
+  "description": "Resource Management Division - Inventory Management System",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"cd server && php artisan serve --port=8000\" \"cd client && npm run dev\"",
+    "build": "cd client && npm run build",
+    "start": "npm run dev",
+    "server": "cd server && php artisan serve --port=8000",
+    "client": "cd client && npm run dev",
+    "install-all": "cd server && composer install && cd ../client && npm install",
+    "fresh-install": "cd server && composer install && php artisan migrate:fresh --seed && cd ../client && npm install",
+    "test": "cd client && npm test"
+  },
+  "keywords": [
+    "inventory",
+    "management",
+    "laravel",
+    "react",
+    "qr-code",
+    "rmd",
+    "gsu"
+  ],
+  "author": "RMD GSU Development Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "workspaces": [
+    "client"
+  ]
+}
