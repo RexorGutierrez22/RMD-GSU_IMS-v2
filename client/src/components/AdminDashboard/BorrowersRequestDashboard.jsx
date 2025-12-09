@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { transactionApiIMS } from '../../services/imsApi';
+import { useDebounce } from '../../hooks/useDebounce';
 
 const BorrowersRequestDashboard = ({ standalone = false }) => {
   const [requests, setRequests] = useState([]);
   const [filteredRequests, setFilteredRequests] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  // Debounce search term to prevent excessive filtering on every keystroke
+  const debouncedSearchTerm = useDebounce(searchTerm, 400);
   const [statusFilter, setStatusFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
@@ -28,14 +31,14 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
       console.log('🔄 Loading borrow requests from API...');
       const response = await transactionApiIMS.getBorrowRequests();
       console.log('📦 API Response:', response);
-      
+
       if (response.success) {
         // Handle paginated response
         let apiRequests = response.data;
         if (response.data.data) {
           apiRequests = response.data.data; // Paginated response
         }
-        
+
         // Transform API data to match component format
         const transformedRequests = apiRequests.map(req => ({
           id: req.id, // Use the primary key, not the transaction_id
@@ -60,7 +63,7 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
           approvedAt: req.approved_at,
           createdAt: req.created_at
         }));
-        
+
         console.log('✅ Transformed requests:', transformedRequests.length);
         setRequests(transformedRequests);
       } else {
@@ -80,16 +83,16 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
     loadBorrowRequests();
   }, []);
 
-  // Filter and search functionality
+  // Filter and search functionality (uses debounced search term to prevent excessive filtering)
   useEffect(() => {
     let filtered = requests;
 
-    if (searchTerm) {
+    if (debouncedSearchTerm) {
       filtered = filtered.filter(request =>
-        request.borrowerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        request.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        request.borrowerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        request.purpose.toLowerCase().includes(searchTerm.toLowerCase())
+        request.borrowerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        request.itemName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        request.borrowerId.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        request.purpose.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
       );
     }
 
@@ -103,14 +106,14 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
 
     setFilteredRequests(filtered);
     setCurrentPage(1);
-  }, [searchTerm, statusFilter, typeFilter, requests]);
+  }, [debouncedSearchTerm, statusFilter, typeFilter, requests]);
 
   // Notification system
   const showNotification = (message, type = 'error') => {
     const id = Date.now();
     const notification = { id, message, type };
     setNotifications(prev => [...prev, notification]);
-    
+
     // Auto remove after 5 seconds
     setTimeout(() => {
       setNotifications(prev => prev.filter(notif => notif.id !== id));
@@ -156,7 +159,7 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
 
   const handleBulkApprove = () => {
     if (selectedRequests.length === 0) return;
-    
+
     // Set default bulk return date to one week from today
     const oneWeekFromNow = new Date();
     oneWeekFromNow.setDate(oneWeekFromNow.getDate() + 7);
@@ -209,21 +212,21 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
       showNotification('Please set a return date before approving the selected requests.', 'error');
       return;
     }
-    
+
     // Check if return date is not in the past
     const today = new Date().toISOString().split('T')[0];
     if (bulkReturnDate < today) {
       showNotification('Return date cannot be in the past. Please select a future date.', 'error');
       return;
     }
-    
+
     // Get count before clearing selectedRequests
     const approvedCount = selectedRequests.length;
-    
+
     // Apply bulk approval with return date
-    setRequests(requests.map(request => 
-      selectedRequests.includes(request.id) 
-        ? { ...request, status: 'Approved', actualReturnDate: bulkReturnDate } 
+    setRequests(requests.map(request =>
+      selectedRequests.includes(request.id)
+        ? { ...request, status: 'Approved', actualReturnDate: bulkReturnDate }
         : request
     ));
     setSelectedRequests([]);
@@ -234,14 +237,14 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
   const confirmBulkReject = () => {
     // Get count before clearing selectedRequests
     const rejectedCount = selectedRequests.length;
-    
+
     // Apply bulk rejection
-    setRequests(requests.map(request => 
-      selectedRequests.includes(request.id) 
-        ? { ...request, status: 'Rejected' } 
+    setRequests(requests.map(request =>
+      selectedRequests.includes(request.id)
+        ? { ...request, status: 'Rejected' }
         : request
     ));
-    
+
     // Clear selections and close modal
     setSelectedRequests([]);
     closeBulkRejectModal();
@@ -255,25 +258,25 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
         showNotification('Please set a return date before approving the request.', 'error');
         return;
       }
-      
+
       // Check if return date is not in the past
       const today = new Date().toISOString().split('T')[0];
       if (returnDate < today) {
         showNotification('Return date cannot be in the past. Please select a future date.', 'error');
         return;
       }
-      
+
       try {
         setIsLoading(true);
         console.log('🔄 Approving request:', actionModal.request.id);
-        
+
         // Call API to approve the request
         const response = await transactionApiIMS.approveBorrowRequest(actionModal.request.id, {
           return_date: returnDate
         });
-        
+
         console.log('📥 Approval response:', response);
-        
+
         if (response.success) {
           // Reload the data to get updated status and inventory counts
           await loadBorrowRequests();
@@ -291,10 +294,10 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
       try {
         setIsLoading(true);
         console.log('🔄 Rejecting request:', actionModal.request.id);
-        
+
         // Call API to reject the request
         const response = await transactionApiIMS.rejectBorrowRequest(actionModal.request.id);
-        
+
         if (response.success) {
           // Reload the data to get updated status
           await loadBorrowRequests();
@@ -342,31 +345,51 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Borrowers Requests</h1>
             <p className="text-gray-600 text-lg">Manage and review borrowing requests</p>
           </div>
-          
-          {/* Bulk Actions */}
-          {selectedRequests.length > 0 && (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600">{selectedRequests.length} selected</span>
-              <button
-                onClick={handleBulkApprove}
-                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+
+          <div className="flex items-center gap-3">
+            {/* Refresh Button */}
+            <button
+              onClick={loadBorrowRequests}
+              disabled={isLoading}
+              className="bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors shadow-sm"
+              title="Refresh data"
+            >
+              <svg
+                className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                Bulk Approve
-              </button>
-              <button
-                onClick={handleBulkReject}
-                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-                Bulk Reject
-              </button>
-            </div>
-          )}
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {isLoading ? 'Refreshing...' : 'Refresh'}
+            </button>
+
+            {/* Bulk Actions */}
+            {selectedRequests.length > 0 && (
+              <>
+                <span className="text-sm text-gray-600">{selectedRequests.length} selected</span>
+                <button
+                  onClick={handleBulkApprove}
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Bulk Approve
+                </button>
+                <button
+                  onClick={handleBulkReject}
+                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  Bulk Reject
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Filters Section */}
@@ -429,7 +452,7 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
               )}
             </p>
           </div>
-          
+
           {/* Items per page selector */}
           <div className="flex items-center gap-2 text-sm">
             <span className="text-gray-600">Items per page:</span>
@@ -537,18 +560,18 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
                           <div className="flex items-center space-x-1">
                             {request.status === 'Pending' && (
                               <>
-                                <button 
+                                <button
                                   onClick={() => handleApprove(request.id)}
-                                  className="text-green-600 hover:text-green-800 transition-colors p-0.5" 
+                                  className="text-green-600 hover:text-green-800 transition-colors p-0.5"
                                   title="Approve"
                                 >
                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                   </svg>
                                 </button>
-                                <button 
+                                <button
                                   onClick={() => handleReject(request.id)}
-                                  className="text-red-600 hover:text-red-800 transition-colors p-0.5" 
+                                  className="text-red-600 hover:text-red-800 transition-colors p-0.5"
                                   title="Reject"
                                 >
                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -557,9 +580,9 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
                                 </button>
                               </>
                             )}
-                            <button 
+                            <button
                               onClick={() => handleViewDetails(request)}
-                              className="text-blue-600 hover:text-blue-800 transition-colors p-0.5" 
+                              className="text-blue-600 hover:text-blue-800 transition-colors p-0.5"
                               title="View Details"
                             >
                               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -658,7 +681,7 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
                 </button>
               </div>
             </div>
-            
+
             {/* Modal Content with Enhanced Layout */}
             <div className="px-6 py-6 overflow-y-auto max-h-[calc(95vh-180px)]">
               {/* Status and Priority Cards */}
@@ -804,7 +827,7 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
                 )}
               </div>
             </div>
-            
+
             {/* Enhanced Action Footer */}
             <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
               <div className="flex justify-between items-center">
@@ -857,8 +880,8 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all duration-300 animate-slideUp">
             {/* Modal Header with Dynamic Color */}
             <div className={`px-6 py-5 ${
-              actionModal.type === 'approve' 
-                ? 'bg-gradient-to-r from-green-600 to-green-700' 
+              actionModal.type === 'approve'
+                ? 'bg-gradient-to-r from-green-600 to-green-700'
                 : 'bg-gradient-to-r from-red-600 to-red-700'
             } text-white`}>
               <div className="flex items-center gap-4">
@@ -889,8 +912,8 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
               {/* Confirmation Message */}
               <div className="text-center mb-6">
                 <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-4 ${
-                  actionModal.type === 'approve' 
-                    ? 'bg-green-100' 
+                  actionModal.type === 'approve'
+                    ? 'bg-green-100'
                     : 'bg-red-100'
                 }`}>
                   {actionModal.type === 'approve' ? (
@@ -1283,8 +1306,8 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
           <div
             key={notification.id}
             className={`relative bg-white rounded-xl shadow-2xl ring-1 ring-black ring-opacity-5 overflow-hidden transform transition-all duration-300 ease-in-out animate-slideIn border-l-4 ${
-              notification.type === 'success' 
-                ? 'border-l-green-500' 
+              notification.type === 'success'
+                ? 'border-l-green-500'
                 : notification.type === 'error'
                 ? 'border-l-red-500'
                 : 'border-l-blue-500'
@@ -1320,8 +1343,8 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
                     <h4 className={`text-sm font-semibold ${
-                      notification.type === 'success' 
-                        ? 'text-green-800' 
+                      notification.type === 'success'
+                        ? 'text-green-800'
                         : notification.type === 'error'
                         ? 'text-red-800'
                         : 'text-blue-800'
@@ -1331,8 +1354,8 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
                     <button
                       onClick={() => removeNotification(notification.id)}
                       className={`flex-shrink-0 rounded-full p-1 transition-colors duration-200 hover:bg-gray-100 ${
-                        notification.type === 'success' 
-                          ? 'text-green-400 hover:text-green-600' 
+                        notification.type === 'success'
+                          ? 'text-green-400 hover:text-green-600'
                           : notification.type === 'error'
                           ? 'text-red-400 hover:text-red-600'
                           : 'text-blue-400 hover:text-blue-600'
@@ -1343,26 +1366,26 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
                       </svg>
                     </button>
                   </div>
-                  
+
                   <p className="text-sm text-gray-700 leading-relaxed pr-2">
                     {notification.message}
                   </p>
                 </div>
               </div>
             </div>
-            
+
             {/* Progress Bar */}
             <div className={`h-1 ${
-              notification.type === 'success' 
-                ? 'bg-green-50' 
+              notification.type === 'success'
+                ? 'bg-green-50'
                 : notification.type === 'error'
                 ? 'bg-red-50'
                 : 'bg-blue-50'
             }`}>
-              <div 
+              <div
                 className={`h-full transition-all duration-5000 ease-linear ${
-                  notification.type === 'success' 
-                    ? 'bg-gradient-to-r from-green-500 to-green-400' 
+                  notification.type === 'success'
+                    ? 'bg-gradient-to-r from-green-500 to-green-400'
                     : notification.type === 'error'
                     ? 'bg-gradient-to-r from-red-500 to-red-400'
                     : 'bg-gradient-to-r from-blue-500 to-blue-400'
@@ -1376,8 +1399,8 @@ const BorrowersRequestDashboard = ({ standalone = false }) => {
 
             {/* Subtle Glow Effect */}
             <div className={`absolute inset-0 rounded-xl pointer-events-none ${
-              notification.type === 'success' 
-                ? 'shadow-green-500/10' 
+              notification.type === 'success'
+                ? 'shadow-green-500/10'
                 : notification.type === 'error'
                 ? 'shadow-red-500/10'
                 : 'shadow-blue-500/10'

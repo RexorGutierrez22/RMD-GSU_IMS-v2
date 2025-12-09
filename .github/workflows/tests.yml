@@ -1,0 +1,73 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: testing
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.0'
+        extensions: mbstring, xml, mysql, pdo, pdo_mysql, bcmath, gd
+        coverage: none
+
+    - name: Copy .env
+      working-directory: ./server
+      run: php -r "file_exists('.env') || copy('.env.example', '.env');"
+
+    - name: Install Dependencies
+      working-directory: ./server
+      run: composer install --prefer-dist --no-progress --no-interaction
+
+    - name: Generate key
+      working-directory: ./server
+      run: php artisan key:generate
+
+    - name: Directory Permissions
+      working-directory: ./server
+      run: chmod -R 775 storage bootstrap/cache
+
+    - name: Create Database
+      working-directory: ./server
+      run: |
+        php artisan migrate --env=testing --force || true
+
+    - name: Execute tests (Unit and Feature)
+      working-directory: ./server
+      env:
+        DB_CONNECTION: mysql
+        DB_HOST: 127.0.0.1
+        DB_PORT: 3306
+        DB_DATABASE: testing
+        DB_USERNAME: root
+        DB_PASSWORD: password
+        APP_ENV: testing
+      run: php artisan test --testsuite=Unit,Feature
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results
+        path: server/storage/logs/*.log
+        retention-days: 7
+

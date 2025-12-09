@@ -31,10 +31,20 @@ export default defineConfig({
       'Access-Control-Allow-Headers': '*'
     }
   },
+  // Disable sourcemaps in development to avoid 404 errors
+  esbuild: {
+    target: 'es2020',
+    // Remove console.logs in development for cleaner output
+    drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : []
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+  },
+  // Development sourcemap configuration
+  css: {
+    devSourcemap: false // Disable CSS sourcemaps in development
   },
   // Optimized build configuration
   build: {
@@ -56,16 +66,16 @@ export default defineConfig({
         manualChunks: {
           // Core React libraries
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          
+
           // API and utilities
           'vendor-utils': ['axios'],
-          
+
           // Core admin functionality
           'admin-core': [
             './src/pages/SuperAdminAccess.jsx',
             './src/pages/AdminDashboard.jsx'
           ],
-          
+
           // User interface components
           'ui-components': [
             './src/components/Alert.jsx',
@@ -106,10 +116,4 @@ export default defineConfig({
     ],
     exclude: []
   },
-  // Performance optimizations
-  esbuild: {
-    target: 'es2020',
-    // Remove console.logs in development for cleaner output
-    drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : []
-  }
 });

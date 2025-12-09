@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { transactionApiIMS } from '../../services/imsApi';
+import { useDebounce } from '../../hooks/useDebounce';
 
 const ReturnVerificationLounge = () => {
 	const [verifications, setVerifications] = useState([]);
@@ -7,6 +8,8 @@ const ReturnVerificationLounge = () => {
 	const [currentPage, setCurrentPage] = useState(1);
 	const [itemsPerPage, setItemsPerPage] = useState(10);
 	const [searchTerm, setSearchTerm] = useState('');
+	// Debounce search term to prevent excessive filtering on every keystroke
+	const debouncedSearchTerm = useDebounce(searchTerm, 400);
 	const [statusFilter, setStatusFilter] = useState('All');
 	const [sortColumn, setSortColumn] = useState('return_date');
 	const [sortOrder, setSortOrder] = useState('desc');
@@ -62,13 +65,13 @@ const ReturnVerificationLounge = () => {
 			);
 		}
 
-		// Search filter
-		if (searchTerm) {
+		// Search filter (uses debounced search term to prevent excessive filtering)
+		if (debouncedSearchTerm) {
 			filtered = filtered.filter(item =>
-				item.verification_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.borrower_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.borrower_id_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.item_name?.toLowerCase().includes(searchTerm.toLowerCase())
+				item.verification_id?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.borrower_name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.borrower_id_number?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.item_name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
 			);
 		}
 
@@ -91,7 +94,7 @@ const ReturnVerificationLounge = () => {
 
 		setFilteredItems(filtered);
 		setCurrentPage(1);
-	}, [verifications, searchTerm, statusFilter, sortColumn, sortOrder]);
+	}, [verifications, debouncedSearchTerm, statusFilter, sortColumn, sortOrder]);
 
 	// Pagination
 	const indexOfLastItem = currentPage * itemsPerPage;

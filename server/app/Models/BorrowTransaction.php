@@ -31,7 +31,10 @@ class BorrowTransaction extends Model
         'notes',
         'status',
         'approved_by',
-        'approved_at'
+        'approved_at',
+        'overdue_notification_sent_at',
+        'due_soon_notification_sent_at',
+        'due_today_notification_sent_at'
     ];
 
     protected $casts = [
@@ -39,6 +42,9 @@ class BorrowTransaction extends Model
         'expected_return_date' => 'date',
         'actual_return_date' => 'date',
         'approved_at' => 'datetime',
+        'overdue_notification_sent_at' => 'datetime',
+        'due_soon_notification_sent_at' => 'datetime',
+        'due_today_notification_sent_at' => 'datetime',
         'quantity' => 'integer',
     ];
 

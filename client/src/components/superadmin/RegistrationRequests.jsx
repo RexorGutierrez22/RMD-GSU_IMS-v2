@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { toast } from 'react-toastify';
+import { RegistrationRequestsTableSkeleton } from '../SkeletonLoaders.jsx';
 
 /**
  * RegistrationRequests Component
  * Manages pending registration requests for admin/staff accounts
  */
-const RegistrationRequests = () => {
+const RegistrationRequests = ({ showToast }) => {
   const [allRequests, setAllRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -76,25 +76,10 @@ const RegistrationRequests = () => {
       setAllRequests(transformedRequests);
       setLoading(false);
 
-      // Show success toast
-      if (transformedRequests.length > 0) {
-        toast.success(`✅ Loaded ${transformedRequests.length} registration request(s)`, {
-          position: "top-right",
-          autoClose: 3000
-        });
-      }
     } catch (error) {
-      console.error('❌ Error fetching registration requests:', error);
-      console.error('Error details:', error.message);
-      const errorMessage = 'Failed to load registration requests: ' + error.message;
-      setError(errorMessage);
+      console.error('Error fetching registration requests:', error);
+      setError('Failed to load registration requests');
       setLoading(false);
-
-      // Show error toast
-      toast.error(errorMessage, {
-        position: "top-right",
-        autoClose: 5000
-      });
     }
   };
 
@@ -106,7 +91,7 @@ const RegistrationRequests = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [sortField, setSortField] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
-  const itemsPerPage = 10;
+  const itemsPerPage = 7;
 
   // Sort function
   const handleSort = (field) => {
@@ -150,10 +135,27 @@ const RegistrationRequests = () => {
   const endIndex = startIndex + itemsPerPage;
   const currentRequests = sortedRequests.slice(startIndex, endIndex);
 
+  // Modal states
+  const [showApproveModal, setShowApproveModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
   // Approve registration request
-  const handleApprove = async (id) => {
+  const handleApprove = (id) => {
+    const request = allRequests.find(r => r.id === id);
+    if (!request) return;
+    setSelectedRequest(request);
+    setShowApproveModal(true);
+  };
+
+  const confirmApprove = async () => {
+    if (!selectedRequest) return;
+
+    setIsProcessing(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/admin-registrations/${id}/approve`, {
+      const response = await fetch(`http://localhost:8000/api/admin-registrations/${selectedRequest.id}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -161,69 +163,257 @@ const RegistrationRequests = () => {
         },
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(result.message || 'Failed to approve registration');
       }
 
-      // Update local state
-      setAllRequests(allRequests.map(req =>
-        req.id === id ? { ...req, status: 'Approved' } : req
-      ));
-
-      toast.success('Registration approved successfully!');
+      if (showToast) {
+        showToast(`✓ Registration approved! ${selectedRequest.name} has been added as ${selectedRequest.role === 'admin' ? 'Admin' : 'Staff'}.`, 'success');
+      }
+      setShowApproveModal(false);
+      setSelectedRequest(null);
       fetchRegistrations(); // Refresh the list
     } catch (error) {
       console.error('Error approving registration:', error);
-      toast.error('Failed to approve registration');
+      if (showToast) {
+        showToast(error.message || 'Failed to approve registration', 'error');
+      }
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   // Reject registration request
-  const handleReject = async (id) => {
-    const reason = prompt('Please enter the reason for rejection (optional):');
+  const handleReject = (id) => {
+    const request = allRequests.find(r => r.id === id);
+    if (!request) return;
+    setSelectedRequest(request);
+    setRejectionReason('');
+    setShowRejectModal(true);
+  };
 
+  const confirmReject = async () => {
+    if (!selectedRequest) return;
+
+    if (!rejectionReason || rejectionReason.trim() === '') {
+      if (showToast) {
+        showToast('Rejection reason is required!', 'error');
+      }
+      return;
+    }
+
+    setIsProcessing(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/admin-registrations/${id}/reject`, {
+      const response = await fetch(`http://localhost:8000/api/admin-registrations/${selectedRequest.id}/reject`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify({ reason: reason || 'No reason provided' })
+        body: JSON.stringify({ rejection_reason: rejectionReason.trim() })
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(result.message || 'Failed to reject registration');
       }
 
-      // Update local state
-      setAllRequests(allRequests.map(req =>
-        req.id === id ? { ...req, status: 'Rejected' } : req
-      ));
-
-      toast.success('Registration rejected successfully!');
+      if (showToast) {
+        showToast(`✗ Registration rejected! ${selectedRequest.name}'s request has been declined.`, 'success');
+      }
+      setShowRejectModal(false);
+      setSelectedRequest(null);
+      setRejectionReason('');
       fetchRegistrations(); // Refresh the list
     } catch (error) {
       console.error('Error rejecting registration:', error);
-      toast.error('Failed to reject registration');
+      if (showToast) {
+        showToast(error.message || 'Failed to reject registration', 'error');
+      }
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="p-6 h-full overflow-y-auto">
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading registration requests...</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <RegistrationRequestsTableSkeleton />;
   }
 
   return (
     <div className="h-full flex flex-col">
+      {/* Approve Confirmation Modal */}
+      {showApproveModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md w-full mx-4 transform transition-all">
+            <div className="flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mx-auto mb-4">
+              <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+
+            <h3 className="text-xl font-bold text-gray-900 text-center mb-2">Approve Registration</h3>
+            <p className="text-gray-600 text-center mb-6">
+              Are you sure you want to approve this registration?
+            </p>
+
+            {selectedRequest && (
+              <div className="bg-gray-50 rounded-lg p-4 mb-6 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Name:</span>
+                  <span className="text-sm font-semibold text-gray-900">{selectedRequest.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Email:</span>
+                  <span className="text-sm text-gray-900">{selectedRequest.email}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Role:</span>
+                  <span className={`text-sm font-semibold ${selectedRequest.role === 'admin' ? 'text-purple-600' : 'text-blue-600'}`}>
+                    {selectedRequest.role === 'admin' ? 'Admin' : 'Staff'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Department:</span>
+                  <span className="text-sm text-gray-900">{selectedRequest.department}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Position:</span>
+                  <span className="text-sm text-gray-900">{selectedRequest.position}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-6">
+              <p className="text-xs text-green-800 text-center">
+                <span className="font-semibold">Note:</span> This account will be added to the{' '}
+                <span className="font-bold">{selectedRequest?.role === 'admin' ? 'SuperAdmin' : 'Staff'}</span> table.
+              </p>
+            </div>
+
+            <div className="flex space-x-3">
+              <button
+                onClick={() => {
+                  setShowApproveModal(false);
+                  setSelectedRequest(null);
+                }}
+                disabled={isProcessing}
+                className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmApprove}
+                disabled={isProcessing}
+                className="flex-1 px-4 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center justify-center"
+              >
+                {isProcessing ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Approving...
+                  </>
+                ) : (
+                  'Approve Registration'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Confirmation Modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md w-full mx-4 transform transition-all">
+            <div className="flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mx-auto mb-4">
+              <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+
+            <h3 className="text-xl font-bold text-gray-900 text-center mb-2">Reject Registration</h3>
+            <p className="text-gray-600 text-center mb-6">
+              Please provide a reason for rejecting this registration request.
+            </p>
+
+            {selectedRequest && (
+              <div className="bg-gray-50 rounded-lg p-4 mb-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Name:</span>
+                  <span className="text-sm font-semibold text-gray-900">{selectedRequest.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Email:</span>
+                  <span className="text-sm text-gray-900">{selectedRequest.email}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm font-medium text-gray-500">Role:</span>
+                  <span className="text-sm text-gray-900">{selectedRequest.role}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Rejection Reason <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder="Enter the reason for rejection..."
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent resize-none"
+                disabled={isProcessing}
+              />
+              {rejectionReason.trim() === '' && (
+                <p className="text-xs text-gray-500 mt-1">This field is required</p>
+              )}
+            </div>
+
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6">
+              <p className="text-xs text-red-800 text-center">
+                <span className="font-semibold">Note:</span> This request will be moved to the rejected registrations table.
+              </p>
+            </div>
+
+            <div className="flex space-x-3">
+              <button
+                onClick={() => {
+                  setShowRejectModal(false);
+                  setSelectedRequest(null);
+                  setRejectionReason('');
+                }}
+                disabled={isProcessing}
+                className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmReject}
+                disabled={isProcessing || rejectionReason.trim() === ''}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center justify-center"
+              >
+                {isProcessing ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Rejecting...
+                  </>
+                ) : (
+                  'Reject Registration'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 6px;
@@ -262,83 +452,147 @@ const RegistrationRequests = () => {
           </div>
         </div>
       </div>
-      <div className="flex-1 px-6 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 px-6 overflow-y-auto custom-scrollbar flex flex-col">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
             {error}
           </div>
         )}
-        <table className="w-full table-fixed">
+        <div className="flex-1 min-h-[calc(7*3.5rem)]"> {/* Minimum height for 7 rows (approximately 3.5rem per row) */}
+          <table className="w-full table-fixed">
           <colgroup>
-            <col className="w-40" />
-            <col className="w-48" />
-            <col className="w-20" />
-            <col className="w-36" />
-            <col className="w-28" />
-            <col className="w-24" />
-            <col className="w-32" />
-            <col className="w-32" />
+            <col className="w-[15%]" />
+            <col className="w-[18%]" />
+            <col className="w-[8%]" />
+            <col className="w-[16%]" />
+            <col className="w-[12%]" />
+            <col className="w-[9%]" />
+            <col className="w-[10%]" />
+            <col className="w-[12%]" />
           </colgroup>
           <thead className="bg-gray-50 sticky top-0 z-10">
             <tr>
               {/* Table headers with sorting */}
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => handleSort('name')} className="flex items-center space-x-1 hover:text-gray-700 transition-colors">
-                  <span>Name</span>
-                  <svg className={`w-4 h-4 ${sortField === 'name' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">
+                <button
+                  onClick={() => handleSort('name')}
+                  className="flex items-center space-x-1 hover:text-gray-700 transition-colors"
+                >
+                  <span>Full Name</span>
+                  <svg className={`w-3 h-3 ${sortField === 'name' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {sortField === 'name' && sortDirection === 'asc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    ) : sortField === 'name' && sortDirection === 'desc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15l-4 4-4-4m0-6l4-4 4 4" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    )}
                   </svg>
                 </button>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => handleSort('email')} className="flex items-center space-x-1 hover:text-gray-700 transition-colors">
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">
+                <button
+                  onClick={() => handleSort('email')}
+                  className="flex items-center space-x-1 hover:text-gray-700 transition-colors"
+                >
                   <span>Email</span>
-                  <svg className={`w-4 h-4 ${sortField === 'email' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                  <svg className={`w-3 h-3 ${sortField === 'email' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {sortField === 'email' && sortDirection === 'asc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    ) : sortField === 'email' && sortDirection === 'desc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15l-4 4-4-4m0-6l4-4 4 4" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    )}
                   </svg>
                 </button>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => handleSort('role')} className="flex items-center space-x-1 hover:text-gray-700 transition-colors">
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">
+                <button
+                  onClick={() => handleSort('role')}
+                  className="flex items-center space-x-1 hover:text-gray-700 transition-colors"
+                >
                   <span>Role</span>
-                  <svg className={`w-4 h-4 ${sortField === 'role' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                  <svg className={`w-3 h-3 ${sortField === 'role' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {sortField === 'role' && sortDirection === 'asc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    ) : sortField === 'role' && sortDirection === 'desc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15l-4 4-4-4m0-6l4-4 4 4" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    )}
                   </svg>
                 </button>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => handleSort('department')} className="flex items-center space-x-1 hover:text-gray-700 transition-colors">
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">
+                <button
+                  onClick={() => handleSort('department')}
+                  className="flex items-center space-x-1 hover:text-gray-700 transition-colors"
+                >
                   <span>Department</span>
-                  <svg className={`w-4 h-4 ${sortField === 'department' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                  <svg className={`w-3 h-3 ${sortField === 'department' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {sortField === 'department' && sortDirection === 'asc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    ) : sortField === 'department' && sortDirection === 'desc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15l-4 4-4-4m0-6l4-4 4 4" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    )}
                   </svg>
                 </button>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => handleSort('position')} className="flex items-center space-x-1 hover:text-gray-700 transition-colors">
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">
+                <button
+                  onClick={() => handleSort('position')}
+                  className="flex items-center space-x-1 hover:text-gray-700 transition-colors"
+                >
                   <span>Position</span>
-                  <svg className={`w-4 h-4 ${sortField === 'position' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                  <svg className={`w-3 h-3 ${sortField === 'position' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {sortField === 'position' && sortDirection === 'asc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    ) : sortField === 'position' && sortDirection === 'desc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15l-4 4-4-4m0-6l4-4 4 4" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    )}
                   </svg>
                 </button>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => handleSort('status')} className="flex items-center space-x-1 hover:text-gray-700 transition-colors">
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">
+                <button
+                  onClick={() => handleSort('status')}
+                  className="flex items-center space-x-1 hover:text-gray-700 transition-colors"
+                >
                   <span>Status</span>
-                  <svg className={`w-4 h-4 ${sortField === 'status' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                  <svg className={`w-3 h-3 ${sortField === 'status' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {sortField === 'status' && sortDirection === 'asc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    ) : sortField === 'status' && sortDirection === 'desc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15l-4 4-4-4m0-6l4-4 4 4" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    )}
                   </svg>
                 </button>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                <button onClick={() => handleSort('requested_date')} className="flex items-center space-x-1 hover:text-gray-700 transition-colors">
-                  <span>Date</span>
-                  <svg className={`w-4 h-4 ${sortField === 'requested_date' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">
+                <button
+                  onClick={() => handleSort('requested_date')}
+                  className="flex items-center space-x-1 hover:text-gray-700 transition-colors"
+                >
+                  <span>Submitted</span>
+                  <svg className={`w-3 h-3 ${sortField === 'requested_date' ? 'text-gray-700' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {sortField === 'requested_date' && sortDirection === 'asc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    ) : sortField === 'requested_date' && sortDirection === 'desc' ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 15l-4 4-4-4m0-6l4-4 4 4" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" />
+                    )}
                   </svg>
                 </button>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-tight">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -362,14 +616,28 @@ const RegistrationRequests = () => {
               </tr>
             ) : (
               currentRequests.map((request) => (
-                <tr key={request.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900 truncate" title={request.name}>{request.name}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 truncate" title={request.email}>{request.email}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 truncate" title={request.role}>{request.role}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 truncate" title={request.department}>{request.department}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900 truncate" title={request.position}>{request.position}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                <tr key={request.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-2 py-2.5 text-xs font-medium text-gray-900 truncate" title={request.name}>
+                    {request.name}
+                  </td>
+                  <td className="px-2 py-2.5 text-xs text-gray-900 truncate" title={request.email}>
+                    {request.email}
+                  </td>
+                  <td className="px-2 py-2.5 text-xs">
+                    <span className={`inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${
+                      request.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {request.role}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2.5 text-xs text-gray-900 truncate" title={request.department}>
+                    {request.department}
+                  </td>
+                  <td className="px-2 py-2.5 text-xs text-gray-900 truncate" title={request.position}>
+                    {request.position}
+                  </td>
+                  <td className="px-2 py-2.5">
+                    <span className={`inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full ${
                       request.status === 'Approved' ? 'bg-green-100 text-green-800' :
                       request.status === 'Rejected' ? 'bg-red-100 text-red-800' :
                       'bg-yellow-100 text-yellow-800'
@@ -377,25 +645,35 @@ const RegistrationRequests = () => {
                       {request.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-900 truncate" title={request.requested_date}>{request.requested_date}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                  <td className="px-2 py-2.5 text-[11px] text-gray-600 truncate" title={request.requested_date}>
+                    {request.requested_date}
+                  </td>
+                  <td className="px-2 py-2.5 whitespace-nowrap">
                     {request.status === 'Pending' ? (
-                      <>
+                      <div className="flex space-x-1">
                         <button
                           onClick={() => handleApprove(request.id)}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs transition-colors"
+                          className="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-[10px] font-medium transition-colors inline-flex items-center"
+                          title="Approve this registration"
                         >
+                          <svg className="w-3 h-3 mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
                           Accept
                         </button>
                         <button
                           onClick={() => handleReject(request.id)}
-                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs transition-colors"
+                          className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-[10px] font-medium transition-colors inline-flex items-center"
+                          title="Reject this registration"
                         >
+                          <svg className="w-3 h-3 mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
                           Reject
                         </button>
-                      </>
+                      </div>
                     ) : (
-                      <span className="text-gray-500 text-xs">No actions available</span>
+                      <span className="text-gray-500 text-[10px] italic">No actions</span>
                     )}
                   </td>
                 </tr>
@@ -403,6 +681,7 @@ const RegistrationRequests = () => {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Pagination */}

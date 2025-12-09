@@ -1,4 +1,5 @@
 import React from 'react';
+import { handleError } from '../utils/errorHandler';
 
 class DashboardErrorBoundary extends React.Component {
   constructor(props) {
@@ -12,8 +13,14 @@ class DashboardErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log error details
-    console.error('Dashboard Error Boundary caught an error:', error, errorInfo);
+    // Use error handler for consistent error reporting
+    try {
+      handleError(error, 'DashboardErrorBoundary');
+    } catch (handlerError) {
+      // Fallback if error handler fails
+      console.error('Dashboard Error Boundary caught an error:', error, errorInfo);
+    }
+
     this.setState({
       error: error,
       errorInfo: errorInfo
@@ -36,7 +43,7 @@ class DashboardErrorBoundary extends React.Component {
                 <p className="text-sm text-gray-500">An error occurred while loading this component</p>
               </div>
             </div>
-            
+
             <div className="space-y-3">
               <button
                 onClick={() => window.location.reload()}
@@ -44,7 +51,7 @@ class DashboardErrorBoundary extends React.Component {
               >
                 Reload Page
               </button>
-              
+
               <button
                 onClick={() => this.setState({ hasError: false, error: null, errorInfo: null })}
                 className="w-full py-2 px-4 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
@@ -52,7 +59,7 @@ class DashboardErrorBoundary extends React.Component {
                 Try Again
               </button>
             </div>
-            
+
             {process.env.NODE_ENV === 'development' && (
               <details className="mt-4 p-3 bg-gray-50 rounded-lg">
                 <summary className="cursor-pointer text-sm font-medium text-gray-700">Error Details</summary>

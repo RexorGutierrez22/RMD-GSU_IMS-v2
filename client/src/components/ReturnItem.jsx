@@ -547,34 +547,6 @@ const ReturnItem = ({ onClose }) => {
                   Scanning for borrowed items...
                 </div>
               </div>
-
-              {/* Demo buttons for testing */}
-              <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-                <p className="text-sm text-yellow-800 font-medium mb-3">Demo Mode - Click to simulate QR scan:</p>
-                <div className="flex gap-2 justify-center flex-wrap">
-                  <button
-                    onClick={() => handleQRScan('STU-2024-001')}
-                    className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition-colors"
-                  >
-                    Student with Items
-                  </button>
-                  <button
-                    onClick={() => handleQRScan('EMP-2024-001')}
-                    className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 transition-colors"
-                  >
-                    Employee with Items
-                  </button>
-                  <button
-                    onClick={() => handleQRScan('2025-159898')}
-                    className="px-4 py-2 bg-purple-500 text-white rounded-lg text-sm hover:bg-purple-600 transition-colors"
-                  >
-                    Thrace Sumabal (Real ID)
-                  </button>
-                </div>
-                <div className="mt-3 text-xs text-gray-600 text-center">
-                  Click "Thrace Sumabal" to test with the actual registered user from your database
-                </div>
-              </div>
             </div>
           )}
 

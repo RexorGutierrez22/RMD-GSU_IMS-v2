@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Alert from '../components/Alert.jsx';
 import QRCodeModal from '../components/QRCodeModal.jsx';
+import EmailVerificationModal from '../components/EmailVerificationModal.jsx';
 import Header from '../components/Header.jsx';
 
 const RegisterStudent = () => {
@@ -21,16 +22,101 @@ const RegisterStudent = () => {
 		contact: '',
 	});
 
+	// Default courses (fallback if API fails)
+	const defaultCourses = [
+		// College of Education (CEd)
+		'BEEd – Bachelor of Elementary Education',
+		'BECEd – Bachelor of Early Childhood Education',
+		'BSpNEd – Bachelor of Special Needs Education',
+		'BSEd Math – Bachelor of Secondary Education (Major in Mathematics)',
+		'BSEd Science – Bachelor of Secondary Education (Major in Science)',
+		'BSEd English – Bachelor of Secondary Education (Major in English)',
+		'BPEd – Bachelor of Physical Education',
+		'BTLEd HE – Bachelor of Technology and Livelihood Education (Home Economics)',
+		'BTVTEd Auto – Bachelor of Technical-Vocational Teacher Education (Automotive Technology)',
+		'BTVTEd CCT – Bachelor of Technical-Vocational Teacher Education (Civil Construction Technology)',
+		'BTVTEd CSS – Bachelor of Technical-Vocational Teacher Education (Computer Systems Servicing)',
+		'BTVTEd ET – Bachelor of Technical-Vocational Teacher Education (Electrical Technology)',
+		'BTVTEd ELX – Bachelor of Technical-Vocational Teacher Education (Electronics Technology)',
+		'BTVTEd Mech – Bachelor of Technical-Vocational Teacher Education (Mechanical Technology)',
+		'BTVTEd HVAC – Bachelor of Technical-Vocational Teacher Education (HVAC Technology)',
+
+		// School of Applied Economics (SAEc)
+		'BSEcon – Bachelor of Science in Economics',
+
+		// College of Business Administration (CBA)
+		'BSBA FM – Bachelor of Science in Business Administration (Financial Management)',
+		'BSEntrep – Bachelor of Science in Entrepreneurship',
+		'BSHM – Bachelor of Science in Hospitality Management',
+
+		// College of Engineering (CoE)
+		'BSCE – Bachelor of Science in Civil Engineering',
+		'BSECE / BSECEng – Bachelor of Science in Electronics Engineering',
+		'BSEE – Bachelor of Science in Electrical Engineering',
+		'BSME – Bachelor of Science in Mechanical Engineering',
+		'BSGE – Bachelor of Science in Geodetic Engineering',
+		'BS Geology – Bachelor of Science in Geology',
+		'BS Mining Eng – Bachelor of Science in Mining Engineering',
+		'BS Sanitary Eng – Bachelor of Science in Sanitary Engineering',
+
+		// College of Arts and Sciences (CAS)
+		'BS Math – Bachelor of Science in Mathematics',
+		'BS Stat – Bachelor of Science in Statistics',
+		'BA LCS – Bachelor of Arts in Literature and Cultural Studies',
+		'BS Bio (Animal Biology) – Bachelor of Science in Biology (Animal Biology)',
+		'BS Bio (Plant Biology) – Bachelor of Science in Biology (Plant Biology)',
+
+		// College of Information and Computing (CIC)
+		'BSIT – Bachelor of Science in Information Technology',
+		'BSBTM – Bachelor of Science in Business Technology Management',
+		'BSCS – Bachelor of Science in Computer Science',
+		'BLIS – Bachelor of Library and Information Science',
+	];
+
+	// USEP Obrero Campus Courses - Will be loaded from database
+	const [usepCourses, setUsepCourses] = useState(defaultCourses);
+	const [loadingCourses, setLoadingCourses] = useState(true);
+
+	// Year Level Options
+	const yearLevels = ['1st Year', '2nd Year', '3rd Year', '4th Year'];
+
+	// Course autocomplete state
+	const [showCourseDropdown, setShowCourseDropdown] = useState(false);
+	const [filteredCourses, setFilteredCourses] = useState(defaultCourses);
+
 	const [loading, setLoading] = useState(false);
 	const [msg, setMsg] = useState('');
 	const [alertType, setAlertType] = useState('error');
 	const [fieldErrors, setFieldErrors] = useState({});
 	const [isCheckingUniqueness, setIsCheckingUniqueness] = useState(false);
 	const [showQRModal, setShowQRModal] = useState(false);
+	const [showVerificationModal, setShowVerificationModal] = useState(false);
 	const [registeredData, setRegisteredData] = useState(null);
+	const [pendingVerification, setPendingVerification] = useState(null);
 
 	const onChange = (e) => {
 		const { name, value } = e.target;
+
+		// Handle course field with autocomplete
+		if (name === 'course') {
+			setForm(prev => ({
+				...prev,
+				[name]: value
+			}));
+
+			// Filter courses based on input
+			if (value.trim() === '') {
+				setFilteredCourses(usepCourses);
+				setShowCourseDropdown(false);
+			} else {
+				const filtered = usepCourses.filter(course =>
+					course.toLowerCase().includes(value.toLowerCase())
+				);
+				setFilteredCourses(filtered);
+				setShowCourseDropdown(filtered.length > 0);
+			}
+			return;
+		}
 
 		// For contact field, only allow numbers and enforce 11-digit limit
 		if (name === 'contact') {
@@ -93,6 +179,55 @@ const RegisterStudent = () => {
 
 		return null;
 	}, []);
+
+	// Fetch courses from API on component mount
+	useEffect(() => {
+		const fetchCourses = async () => {
+			try {
+				setLoadingCourses(true);
+				const response = await fetch('http://localhost:8000/api/ims/v1/courses?active_only=true', {
+					method: 'GET',
+					headers: {
+						'Content-Type': 'application/json',
+						'Accept': 'application/json',
+					},
+				});
+
+				if (response.ok) {
+					const result = await response.json();
+					const courses = result.success ? result.data : (result.data || []);
+					if (Array.isArray(courses) && courses.length > 0) {
+						// Map courses to format: "CODE – Name" or just "Name"
+						const formattedCourses = courses.map(course => {
+							if (course.code && course.name) {
+								return `${course.code} – ${course.name}`;
+							}
+							return course.name;
+						});
+						setUsepCourses(formattedCourses);
+						setFilteredCourses(formattedCourses);
+					} else {
+						// Fallback to default courses
+						setUsepCourses(defaultCourses);
+						setFilteredCourses(defaultCourses);
+					}
+				} else {
+					// Fallback to default courses
+					setUsepCourses(defaultCourses);
+					setFilteredCourses(defaultCourses);
+				}
+			} catch (error) {
+				console.error('Error fetching courses:', error);
+				// Fallback to default courses
+				setUsepCourses(defaultCourses);
+				setFilteredCourses(defaultCourses);
+			} finally {
+				setLoadingCourses(false);
+			}
+		};
+
+		fetchCourses();
+	}, []); // Empty dependency array - only run on mount
 
 	// Real-time uniqueness checking with debounce
 	useEffect(() => {
@@ -269,34 +404,28 @@ const RegisterStudent = () => {
 			const { data } = await axios.post('http://localhost:8000/api/students', formData);
 
 			console.log('🔍 Registration response:', data);
-			console.log('🔍 QR URL from response:', data.qr_url);
-			console.log('🔍 QR Download URL from response:', data.qr_download_url);
 
-			// Store registration data and show success
-			setRegisteredData({
-				...form,
-				id: data.student?.id || 'N/A',
-				qrCode: data.qr_url || data.qr_code || null,
-				qrDownloadUrl: data.qr_download_url || null
-			});
-
-			console.log('🔍 Stored registeredData:', {
-				...form,
-				id: data.student?.id || 'N/A',
-				qrCode: data.qr_url || data.qr_code || null,
-				qrDownloadUrl: data.qr_download_url || null
-			});
-
-			setMsg('🎉 Registration Successful!');
-			setAlertType('success');
-			setShowQRModal(true);
-
-			// Reset form
-			setForm({
-				firstName: '', lastName: '', middleName: '', email: '',
-				studentId: '', course: '', yearLevel: '', contact: ''
-			});
-			setFieldErrors({});
+			// Check if verification is required
+			if (data.requires_verification) {
+				setPendingVerification({
+					userId: data.student_id,
+					email: data.email
+				});
+				setShowVerificationModal(true);
+				setMsg('📧 Verification code sent to your email!');
+				setAlertType('success');
+			} else {
+				// Legacy flow (shouldn't happen with new flow)
+				setRegisteredData({
+					...form,
+					id: data.student?.id || 'N/A',
+					qrCode: data.qr_url || data.qr_code || null,
+					qrDownloadUrl: data.qr_download_url || null
+				});
+				setMsg('🎉 Registration Successful!');
+				setAlertType('success');
+				setShowQRModal(true);
+			}
 		} catch (err) {
 			console.error('Registration error:', err);
 			setAlertType('error');
@@ -560,33 +689,69 @@ const RegisterStudent = () => {
 									</div>
 
 									{/* Course */}
-									<div className="group">
+									<div className="group relative">
 										<label className="block text-xs font-semibold text-gray-700 mb-1">
 											Course *
 										</label>
 										<input
 											name="course"
-											placeholder="Enter course"
+											type="text"
+											placeholder="Type to search course..."
 											value={form.course}
 											onChange={onChange}
+											onFocus={() => {
+												if (form.course.trim() === '') {
+													setFilteredCourses(usepCourses);
+												}
+												setShowCourseDropdown(true);
+											}}
+											onBlur={() => {
+												// Delay hiding dropdown to allow click on suggestions
+												setTimeout(() => setShowCourseDropdown(false), 200);
+											}}
 											className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 group-hover:border-purple-300 transition-all duration-300"
 											required
+											autoComplete="off"
 										/>
+										{/* Course Dropdown Suggestions */}
+										{showCourseDropdown && filteredCourses.length > 0 && (
+											<div className="absolute z-50 w-full mt-1 bg-white border-2 border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+												{filteredCourses.map((course, index) => (
+													<button
+														key={index}
+														type="button"
+														onClick={() => {
+															setForm(prev => ({ ...prev, course }));
+															setShowCourseDropdown(false);
+														}}
+														className="w-full text-left px-4 py-2 text-sm hover:bg-purple-50 hover:text-purple-700 transition-colors border-b border-gray-100 last:border-b-0"
+													>
+														{course}
+													</button>
+												))}
+											</div>
+										)}
 									</div>
 
 									{/* Year Level */}
-									<div className="md:col-span-2 group">
+									<div className="group">
 										<label className="block text-xs font-semibold text-gray-700 mb-1">
 											Year Level *
 										</label>
-										<input
+										<select
 											name="yearLevel"
-											placeholder="Enter year level"
 											value={form.yearLevel}
 											onChange={onChange}
-											className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 group-hover:border-purple-300 transition-all duration-300"
+											className="w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 group-hover:border-purple-300 transition-all duration-300 bg-white"
 											required
-										/>
+										>
+											<option value="">Select year level</option>
+											{yearLevels.map((level, index) => (
+												<option key={index} value={level}>
+													{level}
+												</option>
+											))}
+										</select>
 									</div>
 								</div>
 							</div>
@@ -712,6 +877,42 @@ const RegisterStudent = () => {
 			/>
 
 			{/* QR Code Modal */}
+			{/* Email Verification Modal */}
+			{showVerificationModal && pendingVerification && (
+				<EmailVerificationModal
+					isOpen={showVerificationModal}
+					onClose={() => {
+						setShowVerificationModal(false);
+						setPendingVerification(null);
+					}}
+					onVerificationSuccess={(responseData) => {
+						// Verification successful - show QR modal
+						setRegisteredData({
+							...form,
+							id: responseData.student?.id || 'N/A',
+							qrCode: responseData.qr_url || null,
+							qrDownloadUrl: responseData.qr_download_url || null
+						});
+						setShowVerificationModal(false);
+						setShowQRModal(true);
+						setPendingVerification(null);
+						setMsg('🎉 Email verified! Registration complete!');
+						setAlertType('success');
+
+						// Reset form after successful verification
+						setForm({
+							firstName: '', lastName: '', middleName: '', email: '',
+							studentId: '', course: '', yearLevel: '', contact: ''
+						});
+						setFieldErrors({});
+					}}
+					userId={pendingVerification.userId}
+					email={pendingVerification.email}
+					userType="student"
+				/>
+			)}
+
+			{/* QR Code Modal - shown after successful verification */}
 			{showQRModal && registeredData && (
 				<QRCodeModal
 					isOpen={showQRModal}

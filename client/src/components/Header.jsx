@@ -6,19 +6,19 @@ const Header = ({ title = 'Resource Management Division', subtitle = 'Inventory 
       <div className="w-full h-full px-6">
         <div className="flex items-center h-full">
           {/* University Header Image */}
-          <div 
+          <div
             className={`flex items-center h-full ${
               onTitleClick ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''
             }`}
             onClick={onTitleClick}
           >
-            <img 
-              src="/usep-logo-name-v5.jpg" 
-              alt="University of Southeastern Philippines" 
+            <img
+              src="/usep-logo-name-v5.jpg"
+              alt="University of Southeastern Philippines"
               className="h-20 object-contain"
             />
           </div>
-          
+
           {/* Right Content - Dynamic Title and Subtitle */}
           <div className="flex items-center flex-shrink-0 ml-auto">
             <div className="text-right text-white" style={{ fontFamily: 'CustomHeader, sans-serif' }}>

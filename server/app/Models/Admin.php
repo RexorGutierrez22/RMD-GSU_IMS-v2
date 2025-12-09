@@ -24,6 +24,10 @@ class Admin extends Authenticatable
         'email',
         'username',
         'password',
+        'profile_image',
+        'department',
+        'contact_number',
+        'position',
     ];
 
     /**
@@ -104,5 +108,18 @@ class Admin extends Authenticatable
     public function getRememberTokenName()
     {
         return 'remember_token';
+    }
+
+    /**
+     * Get the full URL for the profile image.
+     *
+     * @return string|null
+     */
+    public function getProfileImageUrlAttribute()
+    {
+        if ($this->profile_image) {
+            return asset('storage/' . $this->profile_image);
+        }
+        return null;
     }
 }

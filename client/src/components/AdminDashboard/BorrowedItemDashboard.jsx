@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { transactionApiIMS, inventoryApiIMS } from '../../services/imsApi';
+import { useDebounce } from '../../hooks/useDebounce';
 
 const BorrowedItemDashboard = () => {
 	const [borrowedItems, setBorrowedItems] = useState([]);
@@ -7,6 +8,8 @@ const BorrowedItemDashboard = () => {
 	const [currentPage, setCurrentPage] = useState(1);
 	const [itemsPerPage, setItemsPerPage] = useState(7);
 	const [searchTerm, setSearchTerm] = useState('');
+	// Debounce search term to prevent excessive filtering on every keystroke
+	const debouncedSearchTerm = useDebounce(searchTerm, 400);
 	const [statusFilter, setStatusFilter] = useState('All');
 	const [categoryFilter, setCategoryFilter] = useState('All');
 	const [sortColumn, setSortColumn] = useState('returnDate');
@@ -15,10 +18,9 @@ const BorrowedItemDashboard = () => {
 	// Modal states
 	const [showDetailModal, setShowDetailModal] = useState(false);
 	const [selectedItem, setSelectedItem] = useState(null);
-	const [showReturnModal, setShowReturnModal] = useState(false);
+	// Removed showReturnModal - items are automatically marked as returned via Return Verification
 	const [showExtendModal, setShowExtendModal] = useState(false);
 	const [newReturnDate, setNewReturnDate] = useState('');
-	const [returnNotes, setReturnNotes] = useState('');
 	const [notifications, setNotifications] = useState([]);
 
 	// Load real borrowed items from API
@@ -36,11 +38,14 @@ const BorrowedItemDashboard = () => {
 					apiData = response.data.data; // Paginated response
 				}
 
-				// All items should already be 'borrowed' status from API filter
-				// No need to filter again, but keep as safety check
+				// Filter to show items with status 'borrowed' or 'pending_return_verification'
+				// Items remain visible in Borrowed Items until admin verifies the return
+				// Status only changes to 'returned' when admin verifies in Return Verification page
 				const borrowedOnly = apiData.filter(item =>
 					item.status === 'borrowed' ||
-					item.status === 'Borrowed'
+					item.status === 'Borrowed' ||
+					item.status === 'pending_return_verification' ||
+					item.status === 'Pending Return Verification'
 				);
 
 				// Transform API data to match component format
@@ -308,14 +313,14 @@ const BorrowedItemDashboard = () => {
 		}
 	}, [borrowedItems.length]);
 
-	// Filter and sort items
+	// Filter and sort items (uses debounced search term to prevent excessive filtering)
 	useEffect(() => {
 		let filtered = borrowedItems.filter(item => {
-			const matchesSearch = !searchTerm ||
-				item.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.borrowerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.borrowerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.department.toLowerCase().includes(searchTerm.toLowerCase());
+			const matchesSearch = !debouncedSearchTerm ||
+				item.itemName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.borrowerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.borrowerId.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.department.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
 
 			const matchesStatus = statusFilter === 'All' || item.status === statusFilter;
 
@@ -347,7 +352,7 @@ const BorrowedItemDashboard = () => {
 
 		setFilteredItems(filtered);
 		setCurrentPage(1);
-	}, [searchTerm, statusFilter, categoryFilter, sortColumn, sortOrder, borrowedItems]);
+	}, [debouncedSearchTerm, statusFilter, categoryFilter, sortColumn, sortOrder, borrowedItems]);
 
 	// Notification system
 	const showNotification = (message, type = 'success') => {
@@ -415,11 +420,8 @@ const BorrowedItemDashboard = () => {
 		}
 	};
 
-	const handleMarkReturned = (itemId) => {
-		const item = borrowedItems.find(i => i.id === itemId);
-		setSelectedItem(item);
-		setShowReturnModal(true);
-	};
+	// Removed handleMarkReturned - items are automatically marked as returned
+	// when admin verifies return in Return Verification page
 
 	const handleExtendReturn = (itemId) => {
 		const item = borrowedItems.find(i => i.id === itemId);
@@ -1041,8 +1043,11 @@ const BorrowedItemDashboard = () => {
 			</div>
 		)}
 
-		{/* Return Item Modal */}
-		{showReturnModal && selectedItem && (
+		{/* Return Item Modal - REMOVED
+			Items are now automatically marked as returned when admin verifies return
+			in the Return Verification page. This ensures proper workflow and logging.
+		*/}
+		{false && selectedItem && (
 			<div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
 				<div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all duration-300 animate-slideUp">
 					{/* Modal Header */}

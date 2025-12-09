@@ -1,24 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { inventoryApiIMS } from '../services/imsApi';
+import { useDebounce } from '../hooks/useDebounce';
 
 const Inventory = ({ standalone = false }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [inventory, setInventory] = useState([]);
   const [filteredInventory, setFilteredInventory] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  // Debounce search term to prevent excessive API calls on every keystroke
+  const debouncedSearchTerm = useDebounce(searchTerm, 400);
   const [statusFilter, setStatusFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
   const [qualityFilter, setQualityFilter] = useState('All');
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(20); // Increased default for better UX
   const [isLoading, setIsLoading] = useState(false);
+  // Pagination metadata from server
+  const [pagination, setPagination] = useState(null);
+  // Use server-side pagination for large datasets (100+ items)
+  const [useServerPagination, setUseServerPagination] = useState(false);
 
-  // Dynamic categories and locations from database
+  // Dynamic categories, locations, and units from database
   const [categories, setCategories] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [units, setUnits] = useState([]);
 
   // Toast notification state
   const [toast, setToast] = useState({
@@ -34,6 +42,17 @@ const Inventory = ({ standalone = false }) => {
     itemName: ''
   });
 
+  // View modal state
+  const [viewModal, setViewModal] = useState({
+    show: false,
+    item: null
+  });
+
+  // Item images state (loaded from API)
+  const [itemImages, setItemImages] = useState({});
+  const [uploadingImageId, setUploadingImageId] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
   // Form state
   const [formData, setFormData] = useState({
     itemName: '',
@@ -46,7 +65,9 @@ const Inventory = ({ standalone = false }) => {
     location: '',
     customLocation: '',
     category: '',
-    quality: 'Usable'
+    quality: 'Usable',
+    customType: '', // Custom type input when "Custom" is selected
+    lowStockThreshold: '' // Low stock threshold percentage (0-100)
   });
 
   // Quantity adjustment state for edit mode
@@ -67,7 +88,7 @@ const Inventory = ({ standalone = false }) => {
     setToast({ show: true, message, type });
     setTimeout(() => {
       setToast({ show: false, message: '', type: 'success' });
-    }, 4000);
+    }, 6000); // Increased to 6 seconds
   };
 
   // Sample data - replace with API calls
@@ -381,22 +402,83 @@ const Inventory = ({ standalone = false }) => {
     }
   };
 
-  // Load inventory data from API
-  const loadInventoryData = async () => {
+  // Load units from API
+  const loadUnits = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/ims/v1/units', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const data = result.success ? result.data : (result.data || result);
+
+        if (Array.isArray(data)) {
+          setUnits(data.filter(unit => unit.is_active).map(unit => unit.name));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading units:', error);
+      // Fallback to default units
+      setUnits(['pcs', 'sheets', 'packs', 'kits', 'kg', 'lbs', 'boxes', 'sets', 'meters']);
+    }
+  };
+
+  // Load inventory data from API with server-side pagination and filtering
+  const loadInventoryData = async (page = 1, resetFilters = false) => {
     try {
       setIsLoading(true);
-      const response = await inventoryApiIMS.getItems();
+
+      // Determine if we should use server-side pagination (for 100+ items)
+      const shouldUseServerPagination = useServerPagination || pagination?.total > 100;
+
+      const response = await inventoryApiIMS.getItems({
+        page: shouldUseServerPagination ? page : 1,
+        per_page: shouldUseServerPagination ? itemsPerPage : 1000, // Load all if client-side
+        search: debouncedSearchTerm || null,
+        category: categoryFilter !== 'All' ? categoryFilter : null,
+        status: statusFilter !== 'All' ? statusFilter : null,
+        quality: qualityFilter !== 'All' ? qualityFilter : null,
+        no_pagination: !shouldUseServerPagination
+      });
 
       if (response.success) {
         const inventoryData = response.data || [];
-        setInventory(inventoryData);
-        setFilteredInventory(inventoryData);
-        showToast(response.message || 'Inventory loaded successfully', 'success');
+
+        if (shouldUseServerPagination && response.pagination) {
+          // Server-side pagination: only store current page
+          setInventory(inventoryData);
+          setFilteredInventory(inventoryData);
+          setPagination(response.pagination);
+          setUseServerPagination(true);
+        } else {
+          // Client-side pagination: store all items
+          setInventory(inventoryData);
+          setFilteredInventory(inventoryData);
+          setPagination(null);
+          setUseServerPagination(false);
+
+          // Auto-switch to server-side if we have 100+ items
+          if (inventoryData.length >= 100) {
+            setUseServerPagination(true);
+            // Reload with server-side pagination
+            return loadInventoryData(1, true);
+          }
+        }
+
+        if (!resetFilters) {
+          showToast(response.message || 'Inventory loaded successfully', 'success');
+        }
       } else {
         showToast('Failed to load inventory data', 'error');
         // Fallback to sample data if API fails
         setInventory(sampleData);
         setFilteredInventory(sampleData);
+        setPagination(null);
       }
     } catch (error) {
       console.error('Error loading inventory:', error);
@@ -404,6 +486,7 @@ const Inventory = ({ standalone = false }) => {
       // Fallback to sample data
       setInventory(sampleData);
       setFilteredInventory(sampleData);
+      setPagination(null);
     } finally {
       setIsLoading(false);
     }
@@ -412,43 +495,60 @@ const Inventory = ({ standalone = false }) => {
   useEffect(() => {
     loadCategories();
     loadLocations();
-    loadInventoryData();
+    loadUnits();
+    loadInventoryData(1);
   }, []);
 
-  // Filter and search functionality
+  // Filter and search functionality - uses server-side filtering if enabled
   useEffect(() => {
-    let filtered = inventory;
+    if (useServerPagination) {
+      // Server-side filtering: reload data from API with filters
+      setCurrentPage(1);
+      loadInventoryData(1, true);
+    } else {
+      // Client-side filtering: filter items in memory (for small datasets < 100 items)
+      let filtered = inventory;
 
-    if (searchTerm) {
-      filtered = filtered.filter(item => {
-        const formattedId = item.display_id || item.formatted_id || `INV-${String(item.id).padStart(3, '0')}`;
-        return (
-          item.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          item.specification.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          item.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          item.quality.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          item.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          formattedId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          item.id.toString().includes(searchTerm)
-        );
-      });
+      if (debouncedSearchTerm) {
+        filtered = filtered.filter(item => {
+          const formattedId = item.display_id || item.formatted_id || `INV-${String(item.id).padStart(3, '0')}`;
+          return (
+            item.itemName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+            item.specification.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+            item.category.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+            item.quality.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+            item.location.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+            formattedId.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+            item.id.toString().includes(debouncedSearchTerm)
+          );
+        });
+      }
+
+      if (statusFilter !== 'All') {
+        filtered = filtered.filter(item => item.status === statusFilter);
+      }
+
+      if (categoryFilter !== 'All') {
+        filtered = filtered.filter(item => item.category === categoryFilter);
+      }
+
+      if (qualityFilter !== 'All') {
+        filtered = filtered.filter(item => item.quality === qualityFilter);
+      }
+
+      setFilteredInventory(filtered);
+      setCurrentPage(1);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearchTerm, statusFilter, categoryFilter, qualityFilter, useServerPagination]);
 
-    if (statusFilter !== 'All') {
-      filtered = filtered.filter(item => item.status === statusFilter);
+  // Reload data when page changes (server-side pagination)
+  useEffect(() => {
+    if (useServerPagination && currentPage > 0) {
+      loadInventoryData(currentPage, true);
     }
-
-    if (categoryFilter !== 'All') {
-      filtered = filtered.filter(item => item.category === categoryFilter);
-    }
-
-    if (qualityFilter !== 'All') {
-      filtered = filtered.filter(item => item.quality === qualityFilter);
-    }
-
-    setFilteredInventory(filtered);
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter, categoryFilter, qualityFilter, inventory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, itemsPerPage, useServerPagination]);
 
   // Sorting function
   const handleSort = (key) => {
@@ -502,11 +602,22 @@ const Inventory = ({ standalone = false }) => {
     });
   }, [filteredInventory, sortConfig]);
 
-  // Pagination
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = sortedInventory.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(sortedInventory.length / itemsPerPage);
+  // Pagination - use server pagination if enabled, otherwise client-side
+  const indexOfLastItem = useServerPagination && pagination
+    ? pagination.to
+    : currentPage * itemsPerPage;
+  const indexOfFirstItem = useServerPagination && pagination
+    ? pagination.from
+    : indexOfLastItem - itemsPerPage;
+  const currentItems = useServerPagination
+    ? sortedInventory // Already paginated from server
+    : sortedInventory.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = useServerPagination && pagination
+    ? pagination.last_page
+    : Math.ceil(sortedInventory.length / itemsPerPage);
+  const totalItems = useServerPagination && pagination
+    ? pagination.total
+    : sortedInventory.length;
 
   // Sortable header component
   const SortableHeader = ({ sortKey, children, className }) => {
@@ -551,6 +662,35 @@ const Inventory = ({ standalone = false }) => {
       const finalLocation = formData.location === 'custom' ? formData.customLocation : formData.location;
       let submissionData = { ...formData, location: finalLocation };
       delete submissionData.customLocation; // Remove the custom location field from final data
+
+      // Handle custom type logic
+      if (formData.quality === 'Custom' && formData.customType) {
+        submissionData.quality = formData.customType.trim();
+      } else if (formData.quality === 'Custom' && !formData.customType) {
+        showToast('Please enter a custom type', 'error');
+        setIsLoading(false);
+        return;
+      }
+      // If quality is not Usable/Consumable and not Custom, it might be a custom type from edit
+      else if (!['Usable', 'Consumable', 'Custom'].includes(formData.quality) && formData.quality) {
+        // This is a custom type from editing an existing item
+        submissionData.quality = formData.quality.trim();
+      }
+      delete submissionData.customType; // Remove customType field from submission
+
+      // Convert empty threshold to null (use default)
+      if (submissionData.lowStockThreshold === '' || submissionData.lowStockThreshold === null) {
+        delete submissionData.lowStockThreshold;
+      } else {
+        // Ensure threshold is a valid number between 0-100
+        const threshold = parseFloat(submissionData.lowStockThreshold);
+        if (isNaN(threshold) || threshold < 0 || threshold > 100) {
+          showToast('Low stock threshold must be between 0 and 100', 'error');
+          setIsLoading(false);
+          return;
+        }
+        submissionData.lowStockThreshold = threshold;
+      }
 
       // Handle quantity adjustment for edit mode
       if (editingItem && quantityAdjustment.type && quantityAdjustment.amount) {
@@ -641,10 +781,19 @@ const Inventory = ({ standalone = false }) => {
     // Exclude status from form data as it will be auto-calculated
     const { status, ...itemWithoutStatus } = item;
 
+    // Check if type is custom (not Usable or Consumable)
+    const itemType = item.quality || item.type || 'Usable';
+    const isCustomType = !['Usable', 'Consumable'].includes(itemType);
+
     setFormData({
       ...itemWithoutStatus,
       location: isCustomLocation ? 'custom' : item.location,
-      customLocation: isCustomLocation ? item.location : ''
+      customLocation: isCustomLocation ? item.location : '',
+      // Handle custom type: if not Usable/Consumable, set to Custom and store value in customType
+      quality: isCustomType ? 'Custom' : itemType,
+      customType: isCustomType ? itemType : '',
+      // Ensure threshold is properly mapped (handle both naming conventions)
+      lowStockThreshold: item.lowStockThreshold || item.low_stock_threshold || item.threshold || ''
     });
     setQuantityAdjustment({
       type: '',
@@ -671,11 +820,14 @@ const Inventory = ({ standalone = false }) => {
       const response = await inventoryApiIMS.deleteItem(deleteModal.itemId);
 
       if (response.success) {
-        showToast(`Item "${itemToDelete?.itemName}" deleted successfully!`, 'info');
+        const message = response.data?.days_until_auto_delete
+          ? `Item "${itemToDelete?.itemName}" archived successfully! It will be automatically deleted in ${response.data.days_until_auto_delete} days if not restored.`
+          : `Item "${itemToDelete?.itemName}" archived successfully! It will be automatically deleted after 1 month if not restored.`;
+        showToast(message, 'info');
         // Reload data to get the latest from database
         await loadInventoryData();
       } else {
-        showToast(response.message || 'Failed to delete item', 'error');
+        showToast(response.message || 'Failed to archive item', 'error');
       }
     } catch (error) {
       console.error('Error deleting item:', error);
@@ -688,6 +840,133 @@ const Inventory = ({ standalone = false }) => {
 
   const cancelDelete = () => {
     setDeleteModal({ show: false, itemId: null, itemName: '' });
+  };
+
+  // Load item images from API when inventory is loaded
+  useEffect(() => {
+    if (inventory.length > 0) {
+      const imagesMap = {};
+      inventory.forEach(item => {
+        if (item.image_url) {
+          imagesMap[item.id] = item.image_url;
+        }
+      });
+      setItemImages(imagesMap);
+    }
+  }, [inventory]);
+
+  // Handle view item
+  const handleView = (item) => {
+    setViewModal({ show: true, item });
+  };
+
+  // Handle image upload with progress tracking
+  const handleImageUpload = async (itemId, event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid image file', 'error');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('Image size should be less than 5MB', 'error');
+      return;
+    }
+
+    setUploadingImageId(itemId);
+    setUploadProgress(0);
+
+    try {
+      // Import inventoryApiIMS
+      const { inventoryApiIMS } = await import('../services/imsApi');
+
+      // Create FormData
+      const formData = new FormData();
+      formData.append('image', file);
+
+      // Use axios directly for progress tracking
+      const axios = (await import('axios')).default;
+      const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
+
+      const response = await axios.post(
+        `http://localhost:8000/api/ims/v1/inventory/${itemId}/upload-image`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'Authorization': token ? `Bearer ${token}` : undefined,
+          },
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percentCompleted);
+          },
+        }
+      );
+
+      if (response.data.success) {
+        // Construct full URL - Storage::url() returns path like /storage/inventory_images/...
+        let imageUrl = response.data.data?.image_url;
+        if (!imageUrl && response.data.data?.image_path) {
+          // If image_url is not provided, construct it from image_path
+          const path = response.data.data.image_path;
+          // Remove 'storage/' prefix if present, as Storage::url() already includes it
+          const cleanPath = path.startsWith('storage/') ? path : `storage/${path}`;
+          imageUrl = `http://localhost:8000/${cleanPath}`;
+        }
+
+        if (imageUrl) {
+          setItemImages(prev => ({
+            ...prev,
+            [itemId]: imageUrl
+          }));
+        }
+        showToast('Image uploaded successfully!', 'success');
+
+        // Refresh inventory to get updated item with image
+        await loadInventoryData();
+      } else {
+        showToast(response.data.message || 'Failed to upload image', 'error');
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      showToast(error.response?.data?.message || 'Error uploading image', 'error');
+    } finally {
+      setUploadingImageId(null);
+      setUploadProgress(0);
+      // Reset file input
+      event.target.value = '';
+    }
+  };
+
+  // Handle remove image
+  const handleRemoveImage = async (itemId) => {
+    if (!window.confirm('Are you sure you want to remove this image?')) {
+      return;
+    }
+
+    try {
+      const { inventoryApiIMS } = await import('../services/imsApi');
+      const response = await inventoryApiIMS.deleteImage(itemId);
+
+      if (response.success) {
+        const updatedImages = { ...itemImages };
+        delete updatedImages[itemId];
+        setItemImages(updatedImages);
+        showToast('Image removed successfully!', 'info');
+
+        // Refresh inventory to get updated item
+        await loadInventoryData();
+      } else {
+        showToast(response.message || 'Failed to remove image', 'error');
+      }
+    } catch (error) {
+      console.error('Error removing image:', error);
+      showToast('Error removing image', 'error');
+    }
   };
 
   const getStatusColor = (status) => {
@@ -722,27 +1001,29 @@ const Inventory = ({ standalone = false }) => {
       `}</style>
       <div className="container mx-auto px-6 py-8">
         {/* Header Section */}
-        <div className="flex justify-between items-center mb-8 relative z-[100] bg-white shadow-md border rounded-xl px-6 py-6">
+        <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">Inventory</h1>
-            <p className="text-gray-600 text-xl">Manage your inventory items</p>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Inventory</h1>
+            <p className="text-gray-600 text-lg">Manage your inventory items</p>
           </div>
           <button
             onClick={() => {
               setEditingItem(null);
-              setFormData({
-                itemName: '',
-                specification: '',
-                size: '',
-                color: '',
-                quantity: '',
-                totalQuantity: '',
-                unit: '',
-                location: '',
-                customLocation: '',
-                category: '',
-                quality: 'Usable'
-              });
+                      setFormData({
+                        itemName: '',
+                        specification: '',
+                        size: '',
+                        color: '',
+                        quantity: '',
+                        totalQuantity: '',
+                        unit: '',
+                        location: '',
+                        customLocation: '',
+                        category: '',
+                        quality: 'Usable',
+                        customType: '',
+                        lowStockThreshold: ''
+                      });
               setQuantityAdjustment({
                 type: '',
                 amount: '',
@@ -750,9 +1031,9 @@ const Inventory = ({ standalone = false }) => {
               });
               setShowModal(true);
             }}
-            className="bg-red-700 hover:bg-red-800 text-white px-8 py-4 rounded-xl flex items-center gap-3 transition-all duration-200 shadow-xl hover:shadow-2xl transform hover:scale-105 font-semibold text-lg z-[101]"
+            className="bg-red-700 hover:bg-red-800 text-white px-6 py-3 rounded-lg flex items-center gap-2 transition-colors font-semibold"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
             </svg>
             Stock In
@@ -957,16 +1238,21 @@ const Inventory = ({ standalone = false }) => {
             <select
               value={itemsPerPage}
               onChange={(e) => {
-                setItemsPerPage(parseInt(e.target.value));
+                const newPerPage = parseInt(e.target.value);
+                setItemsPerPage(newPerPage);
                 setCurrentPage(1);
+                // Reload if using server pagination
+                if (useServerPagination) {
+                  loadInventoryData(1, true);
+                }
               }}
               className="px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500"
             >
-              <option value={5}>5</option>
               <option value={10}>10</option>
-              <option value={15}>15</option>
+              <option value={20}>20</option>
               <option value={25}>25</option>
               <option value={50}>50</option>
+              <option value={100}>100</option>
             </select>
           </div>
         </div>
@@ -1081,6 +1367,16 @@ const Inventory = ({ standalone = false }) => {
                           <td className="w-32 px-4 py-4 whitespace-nowrap text-sm font-medium">
                             <div className="flex items-center gap-2">
                               <button
+                                onClick={() => handleView(item)}
+                                className="text-green-600 hover:text-green-900"
+                                title="View"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                              </button>
+                              <button
                                 onClick={() => handleEdit(item)}
                                 className="text-blue-600 hover:text-blue-900"
                                 title="Edit"
@@ -1092,10 +1388,10 @@ const Inventory = ({ standalone = false }) => {
                               <button
                                 onClick={() => handleDelete(item.id)}
                                 className="text-red-600 hover:text-red-900"
-                                title="Delete"
+                                title="Archive"
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
                                 </svg>
                               </button>
                             </div>
@@ -1124,7 +1420,10 @@ const Inventory = ({ standalone = false }) => {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="text-sm text-gray-700">
-                  Showing {Math.min(indexOfFirstItem + 1, sortedInventory.length)} - {Math.min(indexOfLastItem, sortedInventory.length)} of {sortedInventory.length} items
+                  Showing {indexOfFirstItem || 0} - {Math.min(indexOfLastItem, totalItems)} of {totalItems} items
+                  {useServerPagination && (
+                    <span className="ml-2 text-xs text-blue-600 font-medium">(Server-side pagination)</span>
+                  )}
                 </div>
                 <div className="text-sm text-gray-500">
                   Page {totalPages > 0 ? currentPage : 0} of {Math.max(totalPages, 1)}
@@ -1209,19 +1508,21 @@ const Inventory = ({ standalone = false }) => {
                   onClick={() => {
                     setShowModal(false);
                     setEditingItem(null);
-                    setFormData({
-                      itemName: '',
-                      specification: '',
-                      size: '',
-                      color: '',
-                      quantity: '',
-                      totalQuantity: '',
-                      unit: '',
-                      location: '',
-                      customLocation: '',
-                      category: '',
-                      quality: 'Usable'
-                    });
+                      setFormData({
+                        itemName: '',
+                        specification: '',
+                        size: '',
+                        color: '',
+                        quantity: '',
+                        totalQuantity: '',
+                        unit: '',
+                        location: '',
+                        customLocation: '',
+                        category: '',
+                        quality: 'Usable',
+                        customType: '',
+                        lowStockThreshold: ''
+                      });
                     setQuantityAdjustment({
                       type: '',
                       amount: '',
@@ -1301,13 +1602,34 @@ const Inventory = ({ standalone = false }) => {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Type *</label>
                     <select
                       required
-                      value={formData.quality}
-                      onChange={(e) => setFormData({...formData, quality: e.target.value})}
+                      value={formData.quality === 'Custom' || (!['Usable', 'Consumable'].includes(formData.quality) && formData.quality) ? 'Custom' : formData.quality}
+                      onChange={(e) => {
+                        if (e.target.value === 'Custom') {
+                          setFormData({...formData, quality: 'Custom', customType: formData.customType || formData.quality});
+                        } else {
+                          setFormData({...formData, quality: e.target.value, customType: ''});
+                        }
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
                     >
                       <option value="Usable">Usable</option>
                       <option value="Consumable">Consumable</option>
+                      <option value="Custom">Custom (Enter your own)</option>
                     </select>
+                    {(formData.quality === 'Custom' || (!['Usable', 'Consumable'].includes(formData.quality) && formData.quality)) && (
+                      <input
+                        type="text"
+                        required
+                        value={formData.customType || (formData.quality !== 'Custom' ? formData.quality : '')}
+                        onChange={(e) => {
+                          const customValue = e.target.value;
+                          setFormData({...formData, customType: customValue, quality: 'Custom'});
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 mt-2"
+                        placeholder="Enter custom type (e.g., Equipment, Tool, Material)"
+                        maxLength={50}
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -1343,10 +1665,33 @@ const Inventory = ({ standalone = false }) => {
                           />
                         </div>
                         <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Low Stock Threshold (%)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.1"
+                            value={formData.lowStockThreshold}
+                            onChange={(e) => setFormData({...formData, lowStockThreshold: parseFloat(e.target.value) || ''})}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                            placeholder="30 (default)"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            {formData.lowStockThreshold
+                              ? `Alert when stock ≤ ${formData.lowStockThreshold}%`
+                              : 'Default: 30% (alert when stock ≤ 30%)'}
+                          </p>
+                        </div>
+                        <div>
                           <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                           <div className="px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 font-medium text-center">
-                            {formData.quantity === 0 ? 'out of stock' :
-                             formData.quantity <= (formData.totalQuantity * 0.2) ? 'low stock' : 'available'}
+                            {(() => {
+                              const threshold = formData.lowStockThreshold ? parseFloat(formData.lowStockThreshold) / 100 : 0.3;
+                              const thresholdQty = formData.totalQuantity ? Math.floor(formData.totalQuantity * threshold) : 0;
+                              if (formData.quantity === 0) return 'out of stock';
+                              if (formData.quantity <= thresholdQty) return 'low stock';
+                              return 'available';
+                            })()}
                           </div>
                           <p className="text-xs text-gray-500 mt-1">Auto-calculated</p>
                         </div>
@@ -1415,8 +1760,8 @@ const Inventory = ({ standalone = false }) => {
                     </div>
                   </div>
                 ) : (
-                  // Add Mode: Show Initial Stock Quantity and Unit side by side
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  // Add Mode: Show Initial Stock Quantity, Unit, and Threshold
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Initial Stock Quantity *</label>
                       <input
@@ -1438,16 +1783,42 @@ const Inventory = ({ standalone = false }) => {
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
                       >
                         <option value="">Select Unit</option>
-                        <option value="pcs">pieces</option>
-                        <option value="sheets">sheets</option>
-                        <option value="packs">packs</option>
-                        <option value="kits">kits</option>
-                        <option value="kg">kilograms</option>
-                        <option value="lbs">pounds</option>
-                        <option value="boxes">boxes</option>
-                        <option value="sets">sets</option>
-                        <option value="meters">meters</option>
+                        {units.length > 0 ? (
+                          units.map((unit) => (
+                            <option key={unit} value={unit}>{unit}</option>
+                          ))
+                        ) : (
+                          <>
+                            <option value="pcs">pieces</option>
+                            <option value="sheets">sheets</option>
+                            <option value="packs">packs</option>
+                            <option value="kits">kits</option>
+                            <option value="kg">kilograms</option>
+                            <option value="lbs">pounds</option>
+                            <option value="boxes">boxes</option>
+                            <option value="sets">sets</option>
+                            <option value="meters">meters</option>
+                          </>
+                        )}
                       </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Low Stock Threshold (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={formData.lowStockThreshold}
+                        onChange={(e) => setFormData({...formData, lowStockThreshold: parseFloat(e.target.value) || ''})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                        placeholder="30 (default)"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        {formData.lowStockThreshold
+                          ? `Alert when stock ≤ ${formData.lowStockThreshold}%`
+                          : 'Default: 30% (leave empty for default)'}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -1462,15 +1833,23 @@ const Inventory = ({ standalone = false }) => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
                     >
                       <option value="">Select Unit</option>
-                      <option value="pcs">pieces</option>
-                      <option value="sheets">sheets</option>
-                      <option value="packs">packs</option>
-                      <option value="kits">kits</option>
-                      <option value="kg">kilograms</option>
-                      <option value="lbs">pounds</option>
-                      <option value="boxes">boxes</option>
-                      <option value="sets">sets</option>
-                      <option value="meters">meters</option>
+                      {units.length > 0 ? (
+                        units.map((unit) => (
+                          <option key={unit} value={unit}>{unit}</option>
+                        ))
+                      ) : (
+                        <>
+                          <option value="pcs">pieces</option>
+                          <option value="sheets">sheets</option>
+                          <option value="packs">packs</option>
+                          <option value="kits">kits</option>
+                          <option value="kg">kilograms</option>
+                          <option value="lbs">pounds</option>
+                          <option value="boxes">boxes</option>
+                          <option value="sets">sets</option>
+                          <option value="meters">meters</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 )}
@@ -1523,6 +1902,8 @@ const Inventory = ({ standalone = false }) => {
                         customLocation: '',
                         category: '',
                         quality: 'Usable',
+                        customType: '',
+                        lowStockThreshold: '',
                         status: 'available'
                       });
                       setQuantityAdjustment({
@@ -1562,7 +1943,7 @@ const Inventory = ({ standalone = false }) => {
 
       {/* Toast Notification */}
       {toast.show && (
-        <div className={`fixed bottom-4 right-4 z-50 max-w-sm w-full transition-all duration-300 transform ${
+        <div className={`fixed bottom-4 right-4 z-50 max-w-sm w-full transition-all duration-500 ease-in-out transform ${
           toast.show ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
         }`}>
           <div className={`rounded-lg shadow-lg p-4 border-l-4 ${
@@ -1616,25 +1997,243 @@ const Inventory = ({ standalone = false }) => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* View Item Modal */}
+      {viewModal.show && viewModal.item && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setViewModal({ show: false, item: null })}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-red-900 to-red-800 text-white p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold">Item Details</h2>
+                <button
+                  onClick={() => setViewModal({ show: false, item: null })}
+                  className="text-white hover:text-red-200 transition-colors text-2xl font-bold"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto scrollbar-hide">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Left Column - Image */}
+                <div className="space-y-4">
+                  <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border-2 border-gray-200 shadow-sm">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center space-x-2">
+                      <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <span>Item Image</span>
+                    </h3>
+
+                    {uploadingImageId === viewModal.item.id ? (
+                      <div className="w-full space-y-3">
+                        <div className="w-full h-64 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center">
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600 mb-4"></div>
+                          <p className="text-gray-600 font-semibold mb-2">Uploading image...</p>
+                          <div className="w-full max-w-xs">
+                            <div className="bg-gray-200 rounded-full h-2.5">
+                              <div
+                                className="bg-gradient-to-r from-red-600 to-red-700 h-2.5 rounded-full transition-all duration-300"
+                                style={{ width: `${uploadProgress}%` }}
+                              ></div>
+                            </div>
+                            <p className="text-xs text-gray-600 mt-1 text-center">{uploadProgress}%</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : itemImages[viewModal.item.id] ? (
+                      <div className="relative w-full h-64">
+                        <img
+                          src={itemImages[viewModal.item.id]}
+                          alt={viewModal.item.itemName}
+                          className="w-full h-64 object-contain rounded-lg border-2 border-gray-300 bg-white"
+                          onError={(e) => {
+                            // Hide image and show error state
+                            e.target.style.display = 'none';
+                            const errorDiv = e.target.parentElement.querySelector('.image-error-fallback');
+                            if (errorDiv) {
+                              errorDiv.classList.remove('hidden');
+                              errorDiv.classList.add('flex');
+                            }
+                          }}
+                          onLoad={(e) => {
+                            // Ensure error fallback is hidden when image loads successfully
+                            const errorDiv = e.target.parentElement.querySelector('.image-error-fallback');
+                            if (errorDiv) {
+                              errorDiv.classList.add('hidden');
+                              errorDiv.classList.remove('flex');
+                            }
+                          }}
+                        />
+                        <div className="image-error-fallback w-full h-64 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex-col items-center justify-center hidden absolute inset-0">
+                          <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          <p className="text-gray-500 text-sm mb-4">Image not available</p>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveImage(viewModal.item.id)}
+                          className="absolute top-2 right-2 bg-red-600 text-white rounded-full p-2 hover:bg-red-700 transition-colors shadow-lg z-10"
+                          title="Remove Image"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-full h-64 bg-gray-100 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center">
+                        <svg className="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <p className="text-gray-500 text-sm mb-4">No image uploaded</p>
+                      </div>
+                    )}
+
+                    <div className="mt-4">
+                      <label className={`block w-full px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg hover:from-red-700 hover:to-red-800 transition-all shadow-md hover:shadow-lg cursor-pointer text-center font-semibold ${uploadingImageId === viewModal.item.id ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                        {uploadingImageId === viewModal.item.id ? (
+                          <span className="flex items-center justify-center">
+                            <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Uploading...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center">
+                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                            </svg>
+                            {itemImages[viewModal.item.id] ? 'Change Image' : 'Upload Image'}
+                          </span>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleImageUpload(viewModal.item.id, e)}
+                          className="hidden"
+                          disabled={uploadingImageId === viewModal.item.id}
+                        />
+                      </label>
+                      <p className="text-xs text-gray-500 mt-2 text-center">Max file size: 5MB (JPEG, PNG, JPG, GIF, WEBP)</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column - Item Information */}
+                <div className="space-y-4">
+                  {/* Basic Information */}
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-5 border-2 border-blue-200 shadow-sm">
+                    <h3 className="font-semibold text-gray-900 mb-4 text-lg flex items-center space-x-2">
+                      <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>Basic Information</span>
+                    </h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-start space-x-3">
+                        <span className="font-semibold text-gray-900 min-w-[120px]">Item ID:</span>
+                        <span className="text-gray-700 break-words">{viewModal.item.display_id || viewModal.item.formatted_id || `INV-${String(viewModal.item.id).padStart(3, '0')}`}</span>
+                      </div>
+                      <div className="flex items-start space-x-3">
+                        <span className="font-semibold text-gray-900 min-w-[120px]">Item Name:</span>
+                        <span className="text-gray-700 break-words">{viewModal.item.itemName}</span>
+                      </div>
+                      {viewModal.item.specification && (
+                        <div className="flex items-start space-x-3">
+                          <span className="font-semibold text-gray-900 min-w-[120px]">Specification:</span>
+                          <span className="text-gray-700 break-words">{viewModal.item.specification}</span>
+                        </div>
+                      )}
+                      {(viewModal.item.size || viewModal.item.color) && (
+                        <div className="flex items-start space-x-3">
+                          <span className="font-semibold text-gray-900 min-w-[120px]">Size/Color:</span>
+                          <span className="text-gray-700">{viewModal.item.size || 'N/A'} • {viewModal.item.color || 'N/A'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inventory Details */}
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-5 border-2 border-green-200 shadow-sm">
+                    <h3 className="font-semibold text-gray-900 mb-4 text-lg flex items-center space-x-2">
+                      <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                      </svg>
+                      <span>Inventory Details</span>
+                    </h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-start space-x-3">
+                        <span className="font-semibold text-gray-900 min-w-[120px]">Quantity:</span>
+                        <span className="text-gray-700">{viewModal.item.quantity}/{viewModal.item.totalQuantity} {viewModal.item.unit || 'pcs'}</span>
+                      </div>
+                      <div className="flex items-start space-x-3">
+                        <span className="font-semibold text-gray-900 min-w-[120px]">Location:</span>
+                        <span className="text-gray-700 break-words">{viewModal.item.location}</span>
+                      </div>
+                      <div className="flex items-start space-x-3">
+                        <span className="font-semibold text-gray-900 min-w-[120px]">Type:</span>
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                          viewModal.item.quality === 'Usable' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
+                        }`}>
+                          {viewModal.item.quality}
+                        </span>
+                      </div>
+                      <div className="flex items-start space-x-3">
+                        <span className="font-semibold text-gray-900 min-w-[120px]">Category:</span>
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                          {viewModal.item.category}
+                        </span>
+                      </div>
+                      <div className="flex items-start space-x-3">
+                        <span className="font-semibold text-gray-900 min-w-[120px]">Status:</span>
+                        <span className={`inline-flex px-2.5 py-1.5 text-xs font-bold rounded-full ${getStatusColor(viewModal.item.status)}`}>
+                          {formatStatus(viewModal.item.status)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setViewModal({ show: false, item: null })}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Archive Confirmation Modal */}
       {deleteModal.show && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-96 mx-4 transform transition-all duration-200 scale-100">
             <div className="text-center">
-              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100 mb-4">
-                <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-orange-100 mb-4">
+                <svg className="h-6 w-6 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
                 </svg>
               </div>
 
               <h3 className="text-lg font-medium text-gray-900 mb-2">
-                Delete Item
+                Archive Item
               </h3>
 
-              <p className="text-sm text-gray-500 mb-6">
-                Are you sure you want to delete <span className="font-semibold text-gray-900">"{deleteModal.itemName}"</span>?
-                This action cannot be undone.
+              <p className="text-sm text-gray-500 mb-4">
+                Are you sure you want to archive <span className="font-semibold text-gray-900">"{deleteModal.itemName}"</span>?
+              </p>
+              <p className="text-xs text-gray-400 mb-6">
+                The item will be moved to Archives and automatically deleted after 1 month if not restored. You can retrieve it from the Archives section anytime before then.
               </p>
 
               <div className="flex space-x-3 justify-center">
@@ -1649,10 +2248,10 @@ const Inventory = ({ standalone = false }) => {
                 <button
                   type="button"
                   onClick={confirmDelete}
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700
+                  className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700
                            transition-colors duration-200 font-medium"
                 >
-                  Delete Item
+                  Archive Item
                 </button>
               </div>
             </div>

@@ -17,7 +17,8 @@ const imsApi = axios.create({
 // Optimized request interceptor
 imsApi.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    // Check for admin token first, then regular token
+    const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -26,11 +27,25 @@ imsApi.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Optimized response interceptor with better error handling
+// Optimized response interceptor with better error handling and rate limit detection
 imsApi.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.code === 'ECONNABORTED') {
+  async (error) => {
+    // Handle rate limiting (429 errors)
+    if (error.response?.status === 429) {
+      const retryAfter = error.response.headers['retry-after']
+        ? parseInt(error.response.headers['retry-after']) * 1000
+        : 2000; // Default 2 second delay
+
+      console.warn(`⚠️ Rate limit exceeded. Retrying after ${retryAfter}ms...`);
+
+      // Wait before rejecting to allow caller to handle retry
+      await new Promise(resolve => setTimeout(resolve, retryAfter));
+
+      // Return error with retry info
+      error.retryAfter = retryAfter;
+      error.isRateLimit = true;
+    } else if (error.code === 'ECONNABORTED') {
       console.warn('API request timed out');
     } else if (error.response?.status === 404) {
       console.warn('API endpoint not found');
@@ -241,24 +256,68 @@ export const userApiIMS = {
 };
 
 export const inventoryApiIMS = {
-  // Get all inventory items
-  getItems: async () => {
+  // Get all inventory items with optional pagination and filtering
+  getItems: async (options = {}) => {
     try {
-      const response = await imsApi.get('/inventory');
-      // Handle paginated response from Laravel
-      const data = response.data.data || response.data;
-      const items = data.data || data; // Extract items from pagination
+      const {
+        page = 1,
+        per_page = 20,
+        search = null,
+        category = null,
+        status = null,
+        quality = null,
+        no_pagination = false
+      } = options;
 
-      return {
-        success: true,
-        data: items,
-        message: 'Inventory loaded successfully'
-      };
+      const params = new URLSearchParams();
+      if (!no_pagination) {
+        params.append('page', page);
+        params.append('per_page', per_page);
+      } else {
+        params.append('no_pagination', 'true');
+      }
+      if (search) params.append('search', search);
+      if (category && category !== 'All') params.append('category', category);
+      if (status && status !== 'All') params.append('status', status);
+      if (quality && quality !== 'All') params.append('quality', quality);
+
+      const response = await imsApi.get(`/inventory?${params.toString()}`);
+
+      // Handle paginated response from Laravel
+      const responseData = response.data.data || response.data;
+
+      // Check if response is paginated
+      if (responseData.current_page !== undefined) {
+        // Paginated response
+        return {
+          success: true,
+          data: responseData.data || [],
+          pagination: {
+            current_page: responseData.current_page,
+            last_page: responseData.last_page,
+            per_page: responseData.per_page,
+            total: responseData.total,
+            from: responseData.from,
+            to: responseData.to
+          },
+          message: 'Inventory loaded successfully'
+        };
+      } else {
+        // Non-paginated response (array)
+        const items = Array.isArray(responseData) ? responseData : (responseData.data || []);
+        return {
+          success: true,
+          data: items,
+          pagination: null,
+          message: 'Inventory loaded successfully'
+        };
+      }
     } catch (error) {
       console.warn('API unavailable, using mock inventory data');
       return {
         success: true,
         data: mockInventory,
+        pagination: null,
         message: 'Using demo data (API unavailable)'
       };
     }
@@ -300,18 +359,61 @@ export const inventoryApiIMS = {
     }
   },
 
-  // Delete inventory item
+  // Archive inventory item (instead of permanent deletion)
   deleteItem: async (id) => {
     try {
       const response = await imsApi.delete(`/inventory/${id}`);
       return {
         success: true,
-        message: response.data.message || 'Item deleted successfully'
+        message: response.data.message || 'Item archived successfully',
+        data: response.data.data || {}
       };
     } catch (error) {
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to delete item',
+        message: error.response?.data?.message || 'Failed to archive item',
+        errors: error.response?.data?.errors || {}
+      };
+    }
+  },
+
+  // Get archived inventory items
+  getArchivedItems: async (options = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (options.search) params.append('search', options.search);
+      if (options.page) params.append('page', options.page);
+      if (options.per_page) params.append('per_page', options.per_page);
+
+      const response = await imsApi.get(`/inventory/archived?${params.toString()}`);
+      return {
+        success: true,
+        data: response.data.data || [],
+        pagination: response.data.pagination || null,
+        message: response.data.message || 'Archived items retrieved successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to retrieve archived items',
+        errors: error.response?.data?.errors || {}
+      };
+    }
+  },
+
+  // Restore archived inventory item
+  restoreItem: async (id) => {
+    try {
+      const response = await imsApi.post(`/inventory/${id}/restore`);
+      return {
+        success: true,
+        data: response.data.data || {},
+        message: response.data.message || 'Item restored successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to restore item',
         errors: error.response?.data?.errors || {}
       };
     }
@@ -330,6 +432,47 @@ export const inventoryApiIMS = {
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to retrieve item'
+      };
+    }
+  },
+
+  // Upload image for inventory item
+  uploadImage: async (id, imageFile) => {
+    try {
+      const formData = new FormData();
+      formData.append('image', imageFile);
+
+      const response = await imsApi.post(`/inventory/${id}/upload-image`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return {
+        success: true,
+        data: response.data.data || response.data,
+        message: response.data.message || 'Image uploaded successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to upload image',
+        errors: error.response?.data?.errors || {}
+      };
+    }
+  },
+
+  // Delete image for inventory item
+  deleteImage: async (id) => {
+    try {
+      const response = await imsApi.delete(`/inventory/${id}/delete-image`);
+      return {
+        success: true,
+        message: response.data.message || 'Image deleted successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to delete image'
       };
     }
   },
@@ -481,6 +624,25 @@ export const transactionApiIMS = {
     }
   },
 
+  // Get a single transaction by ID
+  getTransaction: async (transactionId) => {
+    try {
+      const response = await imsApi.get(`/transactions/${transactionId}`);
+      return {
+        success: true,
+        data: response.data.data || response.data,
+        message: 'Transaction loaded successfully'
+      };
+    } catch (error) {
+      console.error('Error fetching transaction:', error);
+      return {
+        success: false,
+        data: null,
+        message: error.response?.data?.message || 'Failed to load transaction'
+      };
+    }
+  },
+
   // Get borrow requests (for admin dashboard)
   getBorrowRequests: async (status = null) => {
     try {
@@ -580,13 +742,38 @@ export const transactionApiIMS = {
   },
 
   // Get returned items (for Returnee Item dashboard)
-  getReturnedItems: async () => {
+  getReturnedItems: async (page = 1, perPage = 15, search = '', noPagination = false) => {
     try {
-      const response = await imsApi.get('/transactions/returned-items');
+      const params = new URLSearchParams();
+      if (!noPagination) {
+        params.append('page', page);
+        params.append('per_page', perPage);
+      } else {
+        params.append('no_pagination', 'true');
+      }
+      if (search) {
+        params.append('search', search);
+      }
+      const response = await imsApi.get(`/transactions/returned-items?${params.toString()}`);
+
+      // Handle both paginated and non-paginated responses
+      const responseData = response.data.data || response.data;
+      // Extract data array from paginated response or use directly
+      const items = Array.isArray(responseData) ? responseData : (responseData.data || responseData);
+
       return {
         success: true,
-        data: response.data.data || response.data,
-        message: 'Returned items loaded successfully'
+        data: items,
+        message: response.data.message || 'Returned items loaded successfully',
+        // Include pagination metadata if available
+        pagination: responseData.current_page ? {
+          current_page: responseData.current_page,
+          last_page: responseData.last_page,
+          per_page: responseData.per_page,
+          total: responseData.total,
+          from: responseData.from,
+          to: responseData.to
+        } : null
       };
     } catch (error) {
       console.error('API Error fetching returned items:', error);
@@ -768,13 +955,32 @@ export const transactionApiIMS = {
   },
 
   // Get pending return verifications (Admin - Return Verification Lounge)
-  getPendingVerifications: async () => {
+  getPendingVerifications: async (page = 1, perPage = 15, noPagination = false) => {
     try {
-      const response = await imsApi.get('/return-verifications/pending');
+      const params = new URLSearchParams();
+      if (!noPagination) {
+        params.append('page', page);
+        params.append('per_page', perPage);
+      } else {
+        params.append('no_pagination', 'true');
+      }
+      const response = await imsApi.get(`/return-verifications/pending?${params.toString()}`);
+
+      // Handle both paginated and non-paginated responses
+      const responseData = response.data.data || response.data;
       return {
         success: true,
-        data: response.data.data || [],
-        message: response.data.message
+        data: responseData,
+        message: response.data.message,
+        // Include pagination metadata if available
+        pagination: responseData.current_page ? {
+          current_page: responseData.current_page,
+          last_page: responseData.last_page,
+          per_page: responseData.per_page,
+          total: responseData.total,
+          from: responseData.from,
+          to: responseData.to
+        } : null
       };
     } catch (error) {
       console.error('❌ Error getting pending verifications:', error);
@@ -823,14 +1029,41 @@ export const transactionApiIMS = {
   },
 
   // Get pending inspections (Admin - Returned Items table)
-  getPendingInspections: async (filters = {}) => {
+  getPendingInspections: async (filters = {}, page = 1, perPage = 15, noPagination = false) => {
     try {
-      const params = new URLSearchParams(filters).toString();
-      const response = await imsApi.get(`/return-inspections/pending${params ? '?' + params : ''}`);
+      const params = new URLSearchParams();
+      if (!noPagination) {
+        params.append('page', page);
+        params.append('per_page', perPage);
+      } else {
+        params.append('no_pagination', 'true');
+      }
+      // Add filter parameters
+      Object.keys(filters).forEach(key => {
+        if (filters[key]) {
+          params.append(key, filters[key]);
+        }
+      });
+      const response = await imsApi.get(`/return-inspections/pending?${params.toString()}`);
+
+      // Handle both paginated and non-paginated responses
+      const responseData = response.data.data || response.data;
+      // Extract data array from paginated response or use directly
+      const items = Array.isArray(responseData) ? responseData : (responseData.data || responseData);
+
       return {
         success: true,
-        data: response.data.data || [],
-        message: response.data.message
+        data: items,
+        message: response.data.message,
+        // Include pagination metadata if available
+        pagination: responseData.current_page ? {
+          current_page: responseData.current_page,
+          last_page: responseData.last_page,
+          per_page: responseData.per_page,
+          total: responseData.total,
+          from: responseData.from,
+          to: responseData.to
+        } : null
       };
     } catch (error) {
       console.error('❌ Error getting pending inspections:', error);
@@ -856,6 +1089,281 @@ export const transactionApiIMS = {
       return {
         success: false,
         message: error.response?.data?.message || 'Failed to inspect item'
+      };
+    }
+  },
+  updateInspectionStatus: async (returnTransactionId, statusData) => {
+    try {
+      const response = await imsApi.put(`/return-inspections/${returnTransactionId}/status`, statusData);
+      return {
+        success: true,
+        data: response.data.data || response.data,
+        message: response.data.message || 'Inspection status updated successfully'
+      };
+    } catch (error) {
+      console.error('❌ Error updating inspection status:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to update inspection status'
+      };
+    }
+  },
+
+  // Get activity logs for analytics dashboard
+  getActivityLogs: async (limit = 10, type = null) => {
+    try {
+      let url = `/activity-logs?limit=${limit}`;
+      if (type) {
+        url += `&type=${type}`;
+      }
+      // Use longer timeout for activity logs (30 seconds) as it may be slow
+      const response = await imsApi.get(url, {
+        timeout: 30000 // 30 seconds for activity logs
+      });
+      return {
+        success: true,
+        data: response.data.data || [],
+        message: 'Activity logs loaded successfully'
+      };
+    } catch (error) {
+      // Handle timeout errors gracefully
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.warn('Activity logs request timed out - returning empty array');
+        return {
+          success: false,
+          data: [],
+          message: 'Activity logs request timed out. Please try again later.'
+        };
+      }
+      console.error('Error fetching activity logs:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.message || 'Failed to load activity logs'
+      };
+    }
+  },
+
+  // Get recent transactions for analytics dashboard (includes both borrow and return)
+  getRecentTransactionsForDashboard: async (limit = 10) => {
+    try {
+      // Use longer timeout for dashboard queries (20 seconds)
+      const response = await imsApi.get(`/transactions/recent-dashboard?limit=${limit}`, {
+        timeout: 20000 // 20 seconds
+      });
+      return {
+        success: true,
+        data: response.data.data || [],
+        message: 'Recent transactions loaded successfully'
+      };
+    } catch (error) {
+      // Handle timeout errors gracefully
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.warn('Recent transactions request timed out - returning empty array');
+        return {
+          success: false,
+          data: [],
+          message: 'Recent transactions request timed out. Please try again later.'
+        };
+      }
+      console.error('Error fetching recent transactions:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.message || 'Failed to load recent transactions'
+      };
+    }
+  },
+
+  // Get calendar data (due dates and return dates)
+  getCalendarData: async (startDate = null, endDate = null) => {
+    try {
+      let url = '/transactions/calendar';
+      const params = [];
+      if (startDate) params.push(`start_date=${startDate}`);
+      if (endDate) params.push(`end_date=${endDate}`);
+      if (params.length > 0) url += '?' + params.join('&');
+
+      const response = await imsApi.get(url);
+      const calendarData = response.data.data || response.data || [];
+      const summary = response.data.summary || {};
+      return {
+        success: true,
+        data: calendarData,
+        summary: summary,
+        message: 'Calendar data loaded successfully'
+      };
+    } catch (error) {
+      console.error('Error fetching calendar data:', error);
+      return {
+        success: false,
+        data: [],
+        summary: { overdue: 0, due_today: 0, upcoming: 0, returned: 0, total: 0 },
+        message: error.response?.data?.message || 'Failed to load calendar data'
+      };
+    }
+  },
+
+  // Get category statistics for analytics dashboard
+  getCategoryStats: async () => {
+    try {
+      // Use longer timeout for dashboard queries (20 seconds)
+      const response = await axios.get(`${BASE_URL}/dashboard/category-stats`, {
+        timeout: 20000 // 20 seconds
+      });
+      return {
+        success: true,
+        data: response.data.categories || [],
+        totalItems: response.data.total_items || 0,
+        totalQuantity: response.data.total_quantity || 0,
+        message: 'Category statistics loaded successfully'
+      };
+    } catch (error) {
+      // Handle timeout errors gracefully
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.warn('Category stats request timed out - returning empty data');
+        return {
+          success: false,
+          data: [],
+          totalItems: 0,
+          totalQuantity: 0,
+          message: 'Category statistics request timed out. Please try again later.'
+        };
+      }
+      console.error('Error fetching category stats:', error);
+      return {
+        success: false,
+        data: [],
+        totalItems: 0,
+        totalQuantity: 0,
+        message: error.response?.data?.message || 'Failed to load category statistics'
+      };
+    }
+  },
+
+  // Get most borrowed items for analytics dashboard
+  getMostBorrowedItems: async (days = 30, limit = 10) => {
+    try {
+      // Use longer timeout for dashboard queries (20 seconds)
+      const response = await axios.get(`${BASE_URL}/dashboard/most-borrowed-items`, {
+        params: { days, limit },
+        timeout: 20000 // 20 seconds
+      });
+      return {
+        success: true,
+        data: response.data.items || [],
+        topItem: response.data.top_item || null,
+        totalBorrows: response.data.total_borrows || 0,
+        periodDays: response.data.period_days || days,
+        message: 'Most borrowed items loaded successfully'
+      };
+    } catch (error) {
+      // Handle timeout errors gracefully
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.warn('Most borrowed items request timed out - returning empty data');
+        return {
+          success: false,
+          data: [],
+          topItem: null,
+          totalBorrows: 0,
+          periodDays: days,
+          message: 'Most borrowed items request timed out. Please try again later.'
+        };
+      }
+      console.error('Error fetching most borrowed items:', error);
+      return {
+        success: false,
+        data: [],
+        topItem: null,
+        totalBorrows: 0,
+        periodDays: days,
+        message: error.response?.data?.message || 'Failed to load most borrowed items'
+      };
+    }
+  },
+
+  // Get borrowing trends for analytics dashboard
+  getBorrowingTrends: async (period = 'monthly') => {
+    try {
+      const response = await axios.get(`${BASE_URL}/dashboard/borrowing-trends`, {
+        params: { period }
+      });
+      return {
+        success: true,
+        data: response.data.data || [],
+        period: response.data.period || period,
+        currentYear: response.data.current_year || new Date().getFullYear(),
+        currentMonth: response.data.current_month || new Date().getMonth() + 1,
+      };
+    } catch (error) {
+      console.error('Error getting borrowing trends:', error);
+      return {
+        success: false,
+        data: [],
+        message: error.response?.data?.message || 'Failed to load borrowing trends'
+      };
+    }
+  },
+
+  // Advanced Analytics Methods
+  getPredictiveAnalytics: async (days = 30, forecastDays = 7) => {
+    try {
+      const response = await axios.get(`${BASE_URL}/analytics/predictive`, {
+        params: { days, forecast_days: forecastDays }
+      });
+      return {
+        success: true,
+        data: response.data.data || {},
+        message: response.data.message || 'Predictive analytics loaded successfully'
+      };
+    } catch (error) {
+      console.error('Error getting predictive analytics:', error);
+      return {
+        success: false,
+        data: {},
+        message: error.response?.data?.message || 'Failed to load predictive analytics'
+      };
+    }
+  },
+
+  getTrendAnalysis: async (period = 'monthly', startDate = null, endDate = null) => {
+    try {
+      const params = { period };
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+
+      const response = await axios.get(`${BASE_URL}/analytics/trends`, { params });
+      return {
+        success: true,
+        data: response.data.data || {},
+        message: response.data.message || 'Trend analysis loaded successfully'
+      };
+    } catch (error) {
+      console.error('Error getting trend analysis:', error);
+      return {
+        success: false,
+        data: {},
+        message: error.response?.data?.message || 'Failed to load trend analysis'
+      };
+    }
+  },
+
+  getForecasting: async (type = 'inventory', days = 30) => {
+    try {
+      const response = await axios.get(`${BASE_URL}/analytics/forecast`, {
+        params: { type, days }
+      });
+      return {
+        success: true,
+        data: response.data.data || {},
+        message: response.data.message || 'Forecasting data loaded successfully'
+      };
+    } catch (error) {
+      console.error('Error getting forecasting:', error);
+      return {
+        success: false,
+        data: {},
+        message: error.response?.data?.message || 'Failed to load forecasting data'
       };
     }
   }

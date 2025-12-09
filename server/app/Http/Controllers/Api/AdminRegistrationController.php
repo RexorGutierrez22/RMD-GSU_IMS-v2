@@ -6,12 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminRegistration;
 use App\Models\Admin;
 use App\Models\SuperAdmin;
+use App\Models\RejectedRegistration;
+use App\Mail\StaffVerificationMail;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class AdminRegistrationController extends Controller
 {
@@ -20,10 +24,28 @@ class AdminRegistrationController extends Controller
      */
     public function register(Request $request): JsonResponse
     {
+        // Check if there's an existing verified registration for this email
+        $existingVerified = AdminRegistration::where('email', $request->email)
+            ->where('status', 'pending')
+            ->whereNotNull('email_verified_at')
+            ->first();
+
+        $emailRule = 'required|email|unique:admin,email';
+        $usernameRule = 'required|string|max:50|unique:admin,username';
+
+        // Allow existing email/username if it's from the verified temporary registration
+        if ($existingVerified) {
+            $emailRule .= '|unique:admin_registrations,email,' . $existingVerified->id;
+            $usernameRule .= '|unique:admin_registrations,username,' . $existingVerified->id;
+        } else {
+            $emailRule .= '|unique:admin_registrations,email';
+            $usernameRule .= '|unique:admin_registrations,username';
+        }
+
         $validator = Validator::make($request->all(), [
             'full_name' => 'required|string|max:255',
-            'email' => 'required|email|unique:admin_registrations,email|unique:admin,email',
-            'username' => 'required|string|max:50|unique:admin_registrations,username|unique:admin,username',
+            'email' => $emailRule,
+            'username' => $usernameRule,
             'password' => [
                 'required',
                 'string',
@@ -57,17 +79,33 @@ class AdminRegistrationController extends Controller
                 ], 422);
             }
 
-            $registration = AdminRegistration::create([
-                'full_name' => $request->full_name,
-                'email' => $request->email,
-                'username' => $request->username,
-                'password' => $request->password, // Will be hashed by model mutator
-                'contact_number' => $request->contact_number,
-                'department' => $request->department,
-                'position' => $request->position,
-                'requested_role' => $request->requested_role,
-                'status' => 'pending'
-            ]);
+            // Check if email is verified (from email authentication code verification step)
+            $existingRegistration = AdminRegistration::where('email', $email)
+                ->where('status', 'pending')
+                ->whereNotNull('email_verified_at')
+                ->first();
+
+            if ($existingRegistration) {
+                // Update existing registration with full form data
+                $existingRegistration->update([
+                    'full_name' => $request->full_name,
+                    'username' => $request->username,
+                    'password' => $request->password, // Will be hashed by model mutator
+                    'contact_number' => $request->contact_number,
+                    'department' => $request->department,
+                    'position' => $request->position,
+                    'requested_role' => $request->requested_role,
+                    'status' => 'pending'
+                ]);
+                $registration = $existingRegistration;
+            } else {
+                // Email not verified - require email authentication code verification first
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email verification required. Please verify your email first.',
+                    'requires_verification' => true
+                ], 422);
+            }
 
             // Send notification to super admin (implement email later)
             Log::info('New admin registration submitted', [
@@ -168,29 +206,84 @@ class AdminRegistrationController extends Controller
                 ], 400);
             }
 
-            // Determine which table to save to based on requested_role
-            if ($registration->requested_role === 'admin') {
-                // Save to superadmin table for admin (full access)
-                $account = SuperAdmin::create([
-                    'full_name' => $registration->full_name,
-                    'email' => $registration->email,
-                    'username' => $registration->username,
-                    'password' => $registration->password, // Already hashed
-                ]);
+            // Check if email or username already exists in admin or superadmin tables
+            $existingAdmin = Admin::where('email', $registration->email)
+                ->orWhere('username', $registration->username)
+                ->first();
 
-                $accountType = 'superadmin';
-                $formattedId = 'SADM-' . str_pad($account->id, 3, '0', STR_PAD_LEFT);
-            } else {
-                // Save to admin table for staff
-                $account = Admin::create([
-                    'full_name' => $registration->full_name,
-                    'email' => $registration->email,
-                    'username' => $registration->username,
-                    'password' => $registration->password, // Already hashed
-                ]);
+            $existingSuperAdmin = SuperAdmin::where('email', $registration->email)
+                ->orWhere('username', $registration->username)
+                ->first();
 
-                $accountType = 'admin';
-                $formattedId = 'ADM-' . str_pad($account->id, 3, '0', STR_PAD_LEFT);
+            if ($existingAdmin || $existingSuperAdmin) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'An account with this email or username already exists. Please use different credentials.',
+                    'existing_account' => [
+                        'email' => $existingAdmin?->email ?? $existingSuperAdmin?->email,
+                        'username' => $existingAdmin?->username ?? $existingSuperAdmin?->username,
+                        'table' => $existingAdmin ? 'admin' : 'superadmin'
+                    ]
+                ], 409);
+            }
+
+            // Determine which table(s) to save to based on requested_role
+            // Use database transaction to ensure atomicity when creating in multiple tables
+            DB::beginTransaction();
+
+            try {
+                if ($registration->requested_role === 'admin') {
+                    // For admin (full access): Save to BOTH admin and superadmin tables
+                    // This allows them to login via both /admin/login and /superadmin/login
+
+                    // Create in admin table first (for /admin/login access)
+                    $adminAccount = Admin::create([
+                        'full_name' => $registration->full_name,
+                        'email' => $registration->email,
+                        'username' => $registration->username,
+                        'password' => $registration->password, // Already hashed
+                        'department' => $registration->department,
+                        'contact_number' => $registration->contact_number,
+                        'position' => $registration->position,
+                    ]);
+
+                    // Also create in superadmin table (for /superadmin/login access)
+                    $superAdminAccount = SuperAdmin::create([
+                        'full_name' => $registration->full_name,
+                        'email' => $registration->email,
+                        'username' => $registration->username,
+                        'password' => $registration->password, // Already hashed
+                        'department' => $registration->department,
+                        'contact_number' => $registration->contact_number,
+                        'position' => $registration->position,
+                    ]);
+
+                    $account = $superAdminAccount; // Use superadmin account for response
+                    $accountType = 'superadmin';
+                    $formattedId = 'SADM-' . str_pad($superAdminAccount->id, 3, '0', STR_PAD_LEFT);
+                } else {
+                    // For staff (limited access): Save ONLY to admin table
+                    // They can only login via /admin/login, NOT /superadmin/login
+                    $account = Admin::create([
+                        'full_name' => $registration->full_name,
+                        'email' => $registration->email,
+                        'username' => $registration->username,
+                        'password' => $registration->password, // Already hashed
+                        'department' => $registration->department,
+                        'contact_number' => $registration->contact_number,
+                        'position' => $registration->position,
+                    ]);
+
+                    $accountType = 'admin';
+                    $formattedId = 'ADM-' . str_pad($account->id, 3, '0', STR_PAD_LEFT);
+                }
+
+                // Commit the transaction if all creates were successful
+                DB::commit();
+            } catch (\Exception $e) {
+                // Rollback the transaction if any create failed
+                DB::rollBack();
+                throw $e;
             }
 
             // Update registration status
@@ -200,19 +293,31 @@ class AdminRegistrationController extends Controller
                 'approved_by' => 1 // Super Admin ID (you might want to get this from authenticated user)
             ]);
 
-            Log::info('Admin/Staff registration approved', [
+            Log::info('Admin/Staff registration approved and transferred', [
                 'registration_id' => $registration->id,
                 'account_id' => $account->id,
                 'account_type' => $accountType,
                 'email' => $account->email,
-                'role' => $registration->requested_role
+                'role' => $registration->requested_role,
+                'transferred_to_table' => $registration->requested_role === 'admin' ? 'admin and superadmin (both)' : 'admin only'
             ]);
+
+            // Optionally delete from admin_registrations after successful transfer
+            // Uncomment the line below if you want to remove approved requests from the table
+            // $registration->delete();
 
             // Send approval email (implement later)
 
+            // Customize message based on role
+            if ($registration->requested_role === 'admin') {
+                $successMessage = 'Registration approved successfully! Admin account created in both admin and superadmin tables (full access).';
+            } else {
+                $successMessage = 'Registration approved successfully! Staff account created (limited access).';
+            }
+
             return response()->json([
                 'success' => true,
-                'message' => 'Registration approved successfully! ' . ucfirst($accountType) . ' account created.',
+                'message' => $successMessage,
                 'data' => [
                     'account_id' => $account->id,
                     'account_type' => $accountType,
@@ -220,6 +325,7 @@ class AdminRegistrationController extends Controller
                     'username' => $account->username,
                     'email' => $account->email,
                     'role' => $registration->requested_role,
+                    'has_full_access' => $registration->requested_role === 'admin', // Indicates if they can login to both admin and superadmin
                     'approved_at' => $registration->approved_at->format('Y-m-d H:i:s')
                 ]
             ]);
@@ -272,6 +378,23 @@ class AdminRegistrationController extends Controller
                 ], 400);
             }
 
+            // Transfer data to rejected_registrations table
+            $rejectedRecord = RejectedRegistration::create([
+                'full_name' => $registration->full_name,
+                'email' => $registration->email,
+                'username' => $registration->username,
+                'password' => $registration->password,
+                'contact_number' => $registration->contact_number,
+                'department' => $registration->department,
+                'position' => $registration->position,
+                'requested_role' => $registration->requested_role,
+                'rejection_reason' => $request->rejection_reason,
+                'rejected_at' => now(),
+                'rejected_by' => 1, // Super Admin ID (you might want to get this from authenticated user)
+                'originally_requested_at' => $registration->created_at,
+            ]);
+
+            // Update original registration status
             $registration->update([
                 'status' => 'rejected',
                 'rejected_at' => now(),
@@ -279,22 +402,27 @@ class AdminRegistrationController extends Controller
                 'approved_by' => 1 // Super Admin ID
             ]);
 
-            Log::info('Admin registration rejected', [
+            Log::info('Admin registration rejected and moved to rejected_registrations', [
                 'registration_id' => $registration->id,
+                'rejected_record_id' => $rejectedRecord->id,
                 'email' => $registration->email,
                 'reason' => $request->rejection_reason
             ]);
+
+            // Optionally delete from admin_registrations after moving to rejected_registrations
+            // $registration->delete();
 
             // Send rejection email (implement later)
 
             return response()->json([
                 'success' => true,
-                'message' => 'Registration rejected successfully',
+                'message' => 'Registration rejected and archived successfully',
                 'data' => [
                     'registration_id' => $registration->formatted_id,
                     'status' => $registration->status,
                     'rejection_reason' => $registration->rejection_reason,
-                    'rejected_at' => $registration->rejected_at->format('Y-m-d H:i:s')
+                    'rejected_at' => $registration->rejected_at->format('Y-m-d H:i:s'),
+                    'archived_to_rejected_table' => true
                 ]
             ]);
 
@@ -365,14 +493,14 @@ class AdminRegistrationController extends Controller
     }
 
     /**
-     * Send OTP for email verification (FREE - using PHP mail)
+     * Send Email Authentication Code for email verification (using Laravel Mail facade)
      */
     public function sendOTP(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
-            'otp_code' => 'required|string|size:6',
-            'full_name' => 'nullable|string'
+            'full_name' => 'nullable|string',
+            'username' => 'nullable|string'
         ]);
 
         if ($validator->fails()) {
@@ -393,111 +521,344 @@ class AdminRegistrationController extends Controller
                 ], 422);
             }
 
-            $fullName = $request->full_name ?? 'User';
-            $otpCode = $request->otp_code;
-
-            // Email content
-            $subject = 'USEP RMD IMS - Email Verification Code';
-            $message = "
-                <html>
-                <head>
-                    <style>
-                        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                        .header { background: linear-gradient(135deg, #dc2626 0%, #7c3aed 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-                        .content { background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }
-                        .otp-box { background: white; border: 2px dashed #dc2626; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
-                        .otp-code { font-size: 32px; font-weight: bold; color: #dc2626; letter-spacing: 5px; }
-                        .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #6b7280; }
-                    </style>
-                </head>
-                <body>
-                    <div class='container'>
-                        <div class='header'>
-                            <h1>🔐 Email Verification</h1>
-                            <p>USEP RMD Inventory Management System</p>
-                        </div>
-                        <div class='content'>
-                            <p>Hello <strong>{$fullName}</strong>,</p>
-                            <p>Thank you for registering for Admin/Staff access to the USEP RMD Inventory Management System.</p>
-                            <p>Please use the following One-Time Password (OTP) to verify your email address:</p>
-
-                            <div class='otp-box'>
-                                <p style='margin: 0; color: #6b7280; font-size: 14px;'>Your OTP Code:</p>
-                                <p class='otp-code'>{$otpCode}</p>
-                                <p style='margin: 0; color: #6b7280; font-size: 12px;'>Valid for 10 minutes</p>
-                            </div>
-
-                            <p><strong>Important:</strong></p>
-                            <ul>
-                                <li>This code will expire in 10 minutes</li>
-                                <li>Do not share this code with anyone</li>
-                                <li>If you didn't request this, please ignore this email</li>
-                            </ul>
-
-                            <p>After verification, your registration will be submitted to the Super Admin for approval.</p>
-                        </div>
-                        <div class='footer'>
-                            <p>University of Southeastern Philippines</p>
-                            <p>RMD Inventory Management System</p>
-                        </div>
-                    </div>
-                </body>
-                </html>
-            ";
-
-            // Headers for HTML email
-            $headers = "MIME-Version: 1.0" . "\r\n";
-            $headers .= "Content-type:text/html;charset=UTF-8" . "\r\n";
-            $headers .= "From: USEP RMD IMS <noreply@usep.edu.ph>" . "\r\n";
-
-            // DEVELOPMENT MODE: Skip actual email sending
-            // For production, remove this block and use real email service (Gmail SMTP, SendGrid, etc.)
-            $isDevelopment = config('app.env') === 'local' || config('app.debug') === true;
-
-            if ($isDevelopment) {
-                // Development: Don't send email, just return OTP for testing
-                Log::info('🔧 DEV MODE: OTP generated (email not sent)', [
-                    'email' => $email,
-                    'otp_code' => $otpCode,
-                    'otp_sent_at' => now()
-                ]);
-
+            // Check if email already exists in admin table, reject
+            if (Admin::where('email', $email)->exists()) {
                 return response()->json([
-                    'success' => true,
-                    'message' => 'OTP sent successfully to your email',
-                    'dev_mode' => true,
-                    'otp_code' => $otpCode, // Only in development!
-                    'note' => 'Development Mode: Email not actually sent. Use the OTP code above.'
-                ]);
+                    'success' => false,
+                    'message' => 'This email is already registered as an admin/staff member.'
+                ], 422);
             }
 
-            // PRODUCTION MODE: Send actual email
-            $mailSent = mail($email, $subject, $message, $headers);
+            // Check if email already exists in admin_registrations table (any status)
+            // We need to check ALL statuses because email has unique constraint
+            $existingRegistration = AdminRegistration::where('email', $email)->first();
 
-            if ($mailSent) {
-                Log::info('OTP email sent successfully', [
+            // Generate 6-digit verification code
+            $verificationCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+            if ($existingRegistration) {
+                // Update existing registration with new email authentication code
+                // Reset status to pending if it was rejected/approved
+                $updateData = [
+                    'email_verification_code' => $verificationCode,
+                    'verification_code_expires_at' => Carbon::now()->addMinutes(15),
+                    'verification_attempts' => 0, // Reset attempts
+                    'status' => 'pending', // Reset to pending for new attempt
+                    'rejection_reason' => null,
+                    'rejected_at' => null,
+                    'approved_at' => null,
+                    'approved_by' => null
+                ];
+
+                // Update optional fields if provided
+                if ($request->full_name) {
+                    $updateData['full_name'] = $request->full_name;
+                }
+                if ($request->has('department')) {
+                    $updateData['department'] = $request->department;
+                }
+                if ($request->has('position')) {
+                    $updateData['position'] = $request->position;
+                }
+                if ($request->requested_role) {
+                    $updateData['requested_role'] = $request->requested_role;
+                }
+                if ($request->username && strlen($request->username) >= 3) {
+                    // Check if username is available before updating
+                    $usernameAvailable = !AdminRegistration::where('username', $request->username)
+                        ->where('id', '!=', $existingRegistration->id)->exists() &&
+                        !Admin::where('username', $request->username)->exists() &&
+                        !SuperAdmin::where('username', $request->username)->exists();
+
+                    if ($usernameAvailable) {
+                        $updateData['username'] = $request->username;
+                    }
+                }
+
+                $existingRegistration->update($updateData);
+                $registration = $existingRegistration;
+
+                Log::info('Updated existing registration for OTP', [
+                    'registration_id' => $registration->id,
                     'email' => $email,
-                    'otp_sent_at' => now()
+                    'previous_status' => $existingRegistration->getOriginal('status')
+                ]);
+            } else {
+                // Create temporary registration record for email authentication code verification
+                // This will be used later when actual registration is submitted
+                // Generate a temporary unique username if not provided
+                $baseUsername = $request->username;
+                $tempUsername = null;
+
+                if ($baseUsername && strlen($baseUsername) >= 3) {
+                    // Check if provided username is available
+                    $usernameAvailable = !AdminRegistration::where('username', $baseUsername)->exists() &&
+                                        !Admin::where('username', $baseUsername)->exists() &&
+                                        !SuperAdmin::where('username', $baseUsername)->exists();
+
+                    if ($usernameAvailable) {
+                        $tempUsername = $baseUsername;
+                    }
+                }
+
+                // Generate unique temporary username if not provided or not available
+                if (!$tempUsername) {
+                    $attempts = 0;
+                    do {
+                        $tempUsername = 'temp_' . uniqid() . '_' . substr(md5($email . microtime(true)), 0, 6);
+                        $attempts++;
+
+                        if ($attempts > 10) {
+                            throw new \Exception('Unable to generate unique temporary username');
+                        }
+                    } while (AdminRegistration::where('username', $tempUsername)->exists() ||
+                             Admin::where('username', $tempUsername)->exists() ||
+                             SuperAdmin::where('username', $tempUsername)->exists());
+                }
+
+                try {
+                    $registration = AdminRegistration::create([
+                        'email' => $email,
+                        'full_name' => $request->full_name ?? 'User',
+                        'username' => $tempUsername,
+                        'password' => Hash::make('temp_password_' . uniqid()), // Temporary password
+                        'department' => $request->department ?? null, // Nullable field
+                        'position' => $request->position ?? null, // Nullable field
+                        'requested_role' => $request->requested_role ?? 'staff', // Has default
+                        'email_verification_code' => $verificationCode,
+                        'verification_code_expires_at' => Carbon::now()->addMinutes(15),
+                        'verification_attempts' => 0,
+                        'status' => 'pending'
+                    ]);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    Log::error('Database error creating temporary registration', [
+                        'error' => $e->getMessage(),
+                        'code' => $e->getCode(),
+                        'email' => $email,
+                        'username' => $tempUsername
+                    ]);
+
+                    // Check if it's a unique constraint violation
+                    if ($e->getCode() == 23000) {
+                        // Try again with a different username
+                        $tempUsername = 'temp_' . uniqid() . '_' . substr(md5($email . microtime(true)), 0, 6);
+                        $registration = AdminRegistration::create([
+                            'email' => $email,
+                            'full_name' => $request->full_name ?? 'User',
+                            'username' => $tempUsername,
+                            'password' => Hash::make('temp_password_' . uniqid()),
+                            'department' => $request->department ?? null,
+                            'position' => $request->position ?? null,
+                            'requested_role' => $request->requested_role ?? 'staff',
+                            'email_verification_code' => $verificationCode,
+                            'verification_code_expires_at' => Carbon::now()->addMinutes(15),
+                            'verification_attempts' => 0,
+                            'status' => 'pending'
+                        ]);
+                    } else {
+                        throw $e;
+                    }
+                }
+            }
+
+            // Send verification email using Laravel Mail facade
+            try {
+                Mail::to($email)->send(new StaffVerificationMail($registration, $verificationCode));
+
+                Log::info('Staff verification email sent successfully', [
+                    'registration_id' => $registration->id,
+                    'email' => $email
                 ]);
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'OTP sent successfully to your email'
+                    'message' => 'Email authentication code has been sent to your email. Please check your inbox to verify your email address and confirm its legitimacy.',
+                    'registration_id' => $registration->id
                 ]);
-            } else {
-                throw new \Exception('Failed to send email');
+
+            } catch (\Exception $e) {
+                Log::error('Failed to send verification email', [
+                    'registration_id' => $registration->id,
+                    'email' => $email,
+                    'error' => $e->getMessage()
+                ]);
+
+                // Delete temporary registration if email fails
+                if (!$existingRegistration) {
+                    $registration->delete();
+                }
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send verification email. Please try again later.',
+                    'error' => 'Email service unavailable'
+                ], 500);
             }
 
         } catch (\Exception $e) {
-            Log::error('Failed to send OTP email', [
+            Log::error('Failed to send email authentication code', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'email' => $request->email,
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to send email authentication code. Please try again later.',
+                'error' => config('app.debug') ? $e->getMessage() : 'Server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Verify Email Authentication Code for email verification
+     */
+    public function verifyOTP(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'verification_code' => 'required|string|size:6'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $email = strtolower($request->email);
+            $verificationCode = $request->verification_code;
+
+            // Find registration by email
+            $registration = AdminRegistration::where('email', $email)
+                ->where('status', 'pending')
+                ->first();
+
+            if (!$registration) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No pending registration found for this email. Please request a new verification code.'
+                ], 404);
+            }
+
+            // Check if code has expired
+            if ($registration->verification_code_expires_at &&
+                Carbon::now()->gt($registration->verification_code_expires_at)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Verification code has expired. Please request a new code.',
+                    'code_expired' => true
+                ], 400);
+            }
+
+            // Check if max attempts reached
+            if ($registration->verification_attempts >= 5) {
+                // Delete the registration record after 5 failed attempts
+                $registration->delete();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Maximum verification attempts reached. Please register again.',
+                    'max_attempts_reached' => true
+                ], 400);
+            }
+
+            // Verify code
+            if ($registration->email_verification_code !== $verificationCode) {
+                $registration->increment('verification_attempts');
+                $remainingAttempts = 5 - $registration->verification_attempts;
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid verification code. ' . ($remainingAttempts > 0 ? "You have {$remainingAttempts} attempt(s) remaining." : 'Maximum attempts reached.'),
+                    'remaining_attempts' => $remainingAttempts,
+                    'max_attempts_reached' => $remainingAttempts === 0
+                ], 400);
+            }
+
+            // Code is correct - mark email as verified
+            $registration->update([
+                'email_verified_at' => Carbon::now(),
+                'email_verification_code' => null,
+                'verification_code_expires_at' => null,
+                'verification_attempts' => 0
+            ]);
+
+            Log::info('Email verified successfully', [
+                'registration_id' => $registration->id,
+                'email' => $email
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Email verified successfully! You can now proceed with registration.',
+                'email_verified' => true,
+                'registration_id' => $registration->id
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to verify email authentication code', [
                 'error' => $e->getMessage(),
                 'email' => $request->email
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to send OTP. Please try again later.'
+                'message' => 'Failed to verify email authentication code. Please try again.'
+            ], 500);
+        }
+    }
+
+    /**
+     * Check username uniqueness (for real-time validation)
+     */
+    public function checkUsernameUniqueness(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'username' => 'required|string|min:3'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid username format',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $username = $request->username;
+
+            // Check if username exists in admin_registrations table
+            $existsInRegistrations = AdminRegistration::where('username', $username)->exists();
+
+            // Check if username exists in admin table
+            $existsInAdmin = Admin::where('username', $username)->exists();
+
+            // Check if username exists in superadmin table
+            $existsInSuperAdmin = SuperAdmin::where('username', $username)->exists();
+
+            $usernameExists = $existsInRegistrations || $existsInAdmin || $existsInSuperAdmin;
+
+            return response()->json([
+                'success' => true,
+                'username_exists' => $usernameExists,
+                'message' => $usernameExists ? 'Username is already taken' : 'Username is available'
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to check username uniqueness', [
+                'error' => $e->getMessage(),
+                'username' => $request->username
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to check username availability'
             ], 500);
         }
     }

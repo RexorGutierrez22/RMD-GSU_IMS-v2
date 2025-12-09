@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+
 const api = axios.create({
-    baseURL: 'http://localhost:8001/api',
+    baseURL: API_BASE_URL,
     headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
@@ -12,9 +14,12 @@ const api = axios.create({
 // Add a request interceptor for handling tokens if needed
 api.interceptors.request.use(
     (config) => {
-        const token = localStorage.getItem('admin_token') || localStorage.getItem('token');
+        // Check for tokens in order of priority: admin_token, super_admin_token, then regular token
+        const token = localStorage.getItem('admin_token') || localStorage.getItem('super_admin_token') || localStorage.getItem('token');
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
+        } else {
+            console.warn('No authentication token found in localStorage');
         }
         return config;
     },
@@ -26,9 +31,17 @@ api.interceptors.request.use(
 // Add a response interceptor for handling errors
 api.interceptors.response.use(
     (response) => response,
-    (error) => {
+    async (error) => {
         if (error.response?.status === 401) {
-            // Handle unauthorized access
+            // For blob responses, don't auto-logout - let the component handle it
+            // This prevents false logouts when report generation fails for other reasons
+            if (error.config?.responseType === 'blob') {
+                // Don't logout automatically for blob requests
+                // The component will handle the error and show appropriate message
+                return Promise.reject(error);
+            }
+
+            // For non-blob requests, handle normally
             localStorage.removeItem('admin_token');
             localStorage.removeItem('token');
             window.location.href = '/admin';
@@ -80,31 +93,50 @@ export const transactionApi = {
     // Borrow transactions
     createBorrow: (borrowData) => api.post('/transactions/borrow', borrowData),
     getBorrowedItems: (userId) => api.get(`/transactions/borrowed/${userId}`),
-    
+
     // Return transactions
     createReturn: (returnData) => api.post('/transactions/return', returnData),
-    
+
     // General transaction queries
     getHistory: (userId) => api.get(`/transactions/history/${userId}`),
     getAllTransactions: (params = {}) => api.get('/transactions', { params }),
     getOverdue: () => api.get('/transactions/overdue'),
     getRecent: (limit = 10) => api.get(`/transactions/recent?limit=${limit}`),
-    
+
     // Statistics
     getStats: (startDate, endDate) => api.get(`/transactions/stats?start=${startDate}&end=${endDate}`)
 };
 
 // Reports API endpoints
 export const reportsApi = {
-    borrowReport: (startDate, endDate) => api.get(`/reports/borrow?start=${startDate}&end=${endDate}`),
-    returnReport: (startDate, endDate) => api.get(`/reports/return?start=${startDate}&end=${endDate}`),
-    inventoryReport: () => api.get('/reports/inventory'),
-    userReport: (userType) => api.get(`/reports/users?type=${userType}`),
-    overdueReport: () => api.get('/reports/overdue'),
-    
-    // Export functions
-    exportBorrowToPDF: (startDate, endDate) => api.get(`/reports/borrow/pdf?start=${startDate}&end=${endDate}`, { responseType: 'blob' }),
-    exportInventoryToExcel: () => api.get('/reports/inventory/excel', { responseType: 'blob' })
+    downloadPdf: (reportType, params = {}) => {
+        // Get the appropriate token
+        const token = localStorage.getItem('admin_token') || localStorage.getItem('super_admin_token') || localStorage.getItem('token');
+
+        return api.get(`/reports/${reportType}/pdf`, {
+            params,
+            responseType: 'blob',
+            headers: {
+                'Accept': 'application/pdf, application/json',
+                'Authorization': token ? `Bearer ${token}` : undefined
+            },
+            timeout: 60000 // 60 second timeout for large PDFs
+        });
+    },
+    downloadExcel: (reportType, params = {}) => {
+        // Get the appropriate token
+        const token = localStorage.getItem('admin_token') || localStorage.getItem('super_admin_token') || localStorage.getItem('token');
+
+        return api.get(`/reports/${reportType}/excel`, {
+            params,
+            responseType: 'blob',
+            headers: {
+                'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json',
+                'Authorization': token ? `Bearer ${token}` : undefined
+            },
+            timeout: 60000 // 60 second timeout for large Excel files
+        });
+    }
 };
 
 export default api;

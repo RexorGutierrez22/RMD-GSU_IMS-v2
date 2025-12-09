@@ -7,6 +7,7 @@ use App\Models\InventoryLocation;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Cache;
 
 class LocationController extends Controller
 {
@@ -16,14 +17,23 @@ class LocationController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = InventoryLocation::query();
+            // Build cache key based on filters
+            $activeOnly = $request->has('active_only') && $request->active_only;
+            $cacheKey = 'locations:' . ($activeOnly ? 'active' : 'all');
 
-            // Filter by active status if requested
-            if ($request->has('active_only') && $request->active_only) {
-                $query->active();
-            }
+            // Cache for 1 hour (3600 seconds) - locations don't change frequently
+            $cacheDuration = 3600;
 
-            $locations = $query->orderBy('name')->get();
+            $locations = Cache::remember($cacheKey, $cacheDuration, function () use ($activeOnly) {
+                $query = InventoryLocation::query();
+
+                // Filter by active status if requested
+                if ($activeOnly) {
+                    $query->active();
+                }
+
+                return $query->orderBy('name')->get();
+            });
 
             return response()->json([
                 'success' => true,
@@ -32,11 +42,26 @@ class LocationController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve locations',
-                'error' => $e->getMessage()
-            ], 500);
+            // Fallback to database if cache fails - ensures system keeps working
+            try {
+                $query = InventoryLocation::query();
+                if ($request->has('active_only') && $request->active_only) {
+                    $query->active();
+                }
+                $locations = $query->orderBy('name')->get();
+
+                return response()->json([
+                    'success' => true,
+                    'data' => $locations,
+                    'message' => 'Locations retrieved successfully'
+                ]);
+            } catch (\Exception $fallbackError) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to retrieve locations',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
         }
     }
 
@@ -92,6 +117,10 @@ class LocationController extends Controller
         try {
             $location = InventoryLocation::create($request->all());
 
+            // Invalidate cache when location is created
+            Cache::forget('locations:all');
+            Cache::forget('locations:active');
+
             return response()->json([
                 'success' => true,
                 'message' => 'Location created successfully',
@@ -138,6 +167,10 @@ class LocationController extends Controller
         try {
             $location->update($request->all());
 
+            // Invalidate cache when location is updated
+            Cache::forget('locations:all');
+            Cache::forget('locations:active');
+
             return response()->json([
                 'success' => true,
                 'message' => 'Location updated successfully',
@@ -178,6 +211,10 @@ class LocationController extends Controller
             }
 
             $location->delete();
+
+            // Invalidate cache when location is deleted
+            Cache::forget('locations:all');
+            Cache::forget('locations:active');
 
             return response()->json([
                 'success' => true,

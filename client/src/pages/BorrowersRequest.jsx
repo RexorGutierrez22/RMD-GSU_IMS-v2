@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { transactionApiIMS } from '../services/imsApi';
+import { useDebounce } from '../hooks/useDebounce';
 
 const BorrowersRequest = ({ standalone = false }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [borrowRequests, setBorrowRequests] = useState([]);
   const [filteredRequests, setFilteredRequests] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  // Debounce search term to prevent excessive filtering on every keystroke
+  const debouncedSearchTerm = useDebounce(searchTerm, 400);
   const [statusFilter, setStatusFilter] = useState('All');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -40,14 +43,14 @@ const BorrowersRequest = ({ standalone = false }) => {
       console.log('🔄 Fetching borrow requests from API...');
       const response = await transactionApiIMS.getBorrowRequests();
       console.log('📦 Borrow Requests Response:', response);
-      
+
       if (response.success) {
         // Handle paginated response
         let requests = response.data;
         if (response.data.data) {
           requests = response.data.data; // Paginated response
         }
-        
+
         console.log('✅ Borrow requests loaded:', requests.length);
         setBorrowRequests(requests);
         setFilteredRequests(requests);
@@ -70,21 +73,21 @@ const BorrowersRequest = ({ standalone = false }) => {
     loadBorrowRequests();
   }, []);
 
-  // Filter and search functionality
+  // Filter and search functionality (uses debounced search term to prevent excessive filtering)
   useEffect(() => {
     let filtered = [...borrowRequests];
 
-    // Search filter
-    if (searchTerm) {
+    // Search filter (uses debounced search term)
+    if (debouncedSearchTerm) {
       filtered = filtered.filter(request => {
         const formattedId = request.formatted_id || request.display_id || `BRW-${String(request.id).padStart(3, '0')}`;
         return (
-          request.request_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          formattedId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          request.borrower_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          request.item_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          request.purpose?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          request.id?.toString().includes(searchTerm)
+          request.request_id?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          formattedId.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          request.borrower_name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          request.item_name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          request.purpose?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          request.id?.toString().includes(debouncedSearchTerm)
         );
       });
     }
@@ -96,7 +99,7 @@ const BorrowersRequest = ({ standalone = false }) => {
 
     setFilteredRequests(filtered);
     setCurrentPage(1);
-  }, [searchTerm, statusFilter, borrowRequests]);
+  }, [debouncedSearchTerm, statusFilter, borrowRequests]);
 
   // Sorting function
   const handleSort = (key) => {

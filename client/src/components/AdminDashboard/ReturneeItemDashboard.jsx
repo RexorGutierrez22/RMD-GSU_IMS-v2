@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { transactionApiIMS } from '../../services/imsApi';
+import { useDebounce } from '../../hooks/useDebounce';
 
 const ReturneeItemDashboard = () => {
 	const [returneeItems, setReturneeItems] = useState([]);
 	const [filteredItems, setFilteredItems] = useState([]);
 	const [searchTerm, setSearchTerm] = useState('');
+	// Debounce search term to prevent excessive filtering on every keystroke
+	const debouncedSearchTerm = useDebounce(searchTerm, 400);
 	const [statusFilter, setStatusFilter] = useState('All');
 	const [categoryFilter, setCategoryFilter] = useState('All');
 	const [conditionFilter, setConditionFilter] = useState('All');
@@ -51,21 +54,27 @@ const ReturneeItemDashboard = () => {
 			if (response.success && response.data) {
 				const transformedItems = response.data.map(item => ({
 					id: item.transaction_id || `RET-${String(item.id).padStart(3, '0')}`,
+					returnTransactionId: item.return_transaction_id, // Store ReturnTransaction ID for API calls
 					itemName: item.item_name,
 					specification: item.item_details || 'No description',
 					returnerName: item.returner_name,
 					returnerId: item.returner_id,
 					returnerType: item.returner_type,
+					returnerEmail: item.returner_email || 'N/A', // Add email mapping
 					department: 'N/A', // Not available in API
 					returnedDate: item.actual_return_date,
 					condition: item.return_condition || 'good',
 					conditionNotes: item.return_notes || '',
 					usability: item.return_condition === 'excellent' || item.return_condition === 'good' ? 'Usable' :
 							  item.return_condition === 'fair' ? 'Partially Usable' : 'Not Usable',
-					status: item.damage_fee > 0 ? 'Needs Repair' :
-						    item.return_condition === 'damaged' ? 'Damaged' :
-						    item.return_condition === 'lost' ? 'Lost' :
-						    'Inspected',
+					// Map inspection_status from API to display status
+					// Default status is "PENDING" for items awaiting inspection
+					// Database enum values: pending_inspection, good_condition, minor_damage, major_damage, lost, unusable
+					// We map any non-pending status to 'INSPECTED' for display
+					status: item.inspection_status === 'pending_inspection' ? 'PENDING' :
+						    (item.inspection_status && item.inspection_status !== 'pending_inspection') ? 'INSPECTED' :
+						    'PENDING', // Default to PENDING for new items
+					inspection_status: item.inspection_status || 'pending_inspection', // Store original inspection_status
 					category: item.item_category,
 					location: item.location || 'N/A',
 					originalBorrowDate: item.borrow_date,
@@ -203,21 +212,20 @@ const ReturneeItemDashboard = () => {
 	];
 
 	useEffect(() => {
-		// Initialize with sample data
-		setReturneeItems(sampleReturneeItems);
-		setFilteredItems(sampleReturneeItems);
+		// Load returned items from API on component mount
+		loadReturnedItems();
 	}, []);
 
 	useEffect(() => {
-		// Apply filters and search
+		// Apply filters and search (uses debounced search term to prevent excessive filtering)
 		let filtered = returneeItems;
 
-		if (searchTerm) {
+		if (debouncedSearchTerm) {
 			filtered = filtered.filter(item =>
-				item.itemName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.returnerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.returnerId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				item.id.toLowerCase().includes(searchTerm.toLowerCase())
+				item.itemName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.returnerName.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.returnerId.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+				item.id.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
 			);
 		}
 
@@ -258,26 +266,48 @@ const ReturneeItemDashboard = () => {
 
 		setFilteredItems(filtered);
 		setCurrentPage(1); // Reset to first page when filters change
-	}, [returneeItems, searchTerm, statusFilter, categoryFilter, conditionFilter, usabilityFilter, sortColumn, sortOrder]);
+	}, [returneeItems, debouncedSearchTerm, statusFilter, categoryFilter, conditionFilter, usabilityFilter, sortColumn, sortOrder]);
 
 	const getStatusColor = (status) => {
 		switch (status) {
-			case 'Pending Inspection': return 'bg-yellow-100 text-yellow-800';
-			case 'Inspected': return 'bg-green-100 text-green-800';
-			case 'Needs Repair': return 'bg-orange-100 text-orange-800';
-			case 'Damaged': return 'bg-red-100 text-red-800';
-			case 'Processed': return 'bg-blue-100 text-blue-800';
-			default: return 'bg-gray-100 text-gray-800';
+			case 'PENDING':
+			case 'Pending Inspection': return 'bg-yellow-100 text-yellow-800 border border-yellow-300';
+			case 'INSPECTED':
+			case 'Inspected': return 'bg-green-100 text-green-800 border border-green-300';
+			case 'Needs Repair': return 'bg-orange-100 text-orange-800 border border-orange-300';
+			case 'Damaged': return 'bg-red-100 text-red-800 border border-red-300';
+			case 'Processed': return 'bg-blue-100 text-blue-800 border border-blue-300';
+			default: return 'bg-gray-100 text-gray-800 border border-gray-300';
 		}
 	};
 
 	const getConditionColor = (condition) => {
-		switch (condition) {
-			case 'Excellent': return 'text-green-600 font-medium';
-			case 'Good': return 'text-blue-600 font-medium';
-			case 'Fair': return 'text-yellow-600 font-medium';
-			case 'Poor': return 'text-red-600 font-medium';
-			default: return 'text-gray-600';
+		// Normalize condition to handle both lowercase and capitalized
+		const normalized = typeof condition === 'string' ? condition.toLowerCase() : '';
+
+		switch (normalized) {
+			case 'excellent': return 'bg-green-100 text-green-800 border border-green-300';
+			case 'good': return 'bg-green-100 text-green-800 border border-green-300'; // Natural green, same as usable
+			case 'fair': return 'bg-gray-100 text-gray-800 border border-gray-300'; // Smoky white
+			case 'poor': return 'bg-orange-100 text-orange-800 border border-orange-300';
+			case 'damaged': return 'bg-red-100 text-red-800 border border-red-300'; // Red background
+			case 'lost': return 'bg-red-100 text-red-800 border border-red-300';
+			default: return 'bg-gray-100 text-gray-800 border border-gray-300';
+		}
+	};
+
+	// Helper function to capitalize condition words
+	const capitalizeCondition = (condition) => {
+		if (!condition) return '';
+		const normalized = condition.toLowerCase();
+		switch (normalized) {
+			case 'excellent': return 'Excellent';
+			case 'good': return 'Good';
+			case 'fair': return 'Fair';
+			case 'poor': return 'Poor';
+			case 'damaged': return 'Damaged';
+			case 'lost': return 'Lost';
+			default: return condition.charAt(0).toUpperCase() + condition.slice(1).toLowerCase();
 		}
 	};
 
@@ -443,6 +473,13 @@ const ReturneeItemDashboard = () => {
 	// Modal handlers
 	const openDetailModal = (item) => {
 		setSelectedItem(item);
+		// Initialize edit values with current values
+		setEditCondition(item.condition || 'good');
+		setEditUsability(item.usability || 'Usable');
+		setEditStatus(item.status || 'PENDING');
+		setIsEditingCondition(false);
+		setIsEditingUsability(false);
+		setIsEditingStatus(false);
 		setShowDetailModal(true);
 	};
 
@@ -503,17 +540,18 @@ const ReturneeItemDashboard = () => {
 
 	// Inline edit functions
 	const startEditCondition = () => {
-		setEditCondition(selectedItem.condition);
+		setEditCondition(selectedItem.condition || 'good');
 		setIsEditingCondition(true);
 	};
 
 	const startEditUsability = () => {
-		setEditUsability(selectedItem.usability);
+		setEditUsability(selectedItem.usability || 'Usable');
 		setIsEditingUsability(true);
 	};
 
 	const startEditStatus = () => {
-		setEditStatus(selectedItem.status);
+		// Default to PENDING if status is not set
+		setEditStatus(selectedItem.status || 'PENDING');
 		setIsEditingStatus(true);
 	};
 
@@ -522,47 +560,130 @@ const ReturneeItemDashboard = () => {
 		const conditionChanged = isEditingCondition && editCondition !== selectedItem.condition;
 		const usabilityChanged = isEditingUsability && editUsability !== selectedItem.usability;
 		const statusChanged = isEditingStatus && editStatus !== selectedItem.status;
-
 		setHasChanges(conditionChanged || usabilityChanged || statusChanged);
 	};
 
-	// Update all changes at once
-	const saveAllChanges = () => {
+	// Update inspection data (condition, usability, and status)
+	const saveAllChanges = async () => {
 		let updateMessages = [];
-		let updatedItem = { ...selectedItem };
+		let hasAnyChanges = false;
 
-		// Update condition if changed
-		if (isEditingCondition && editCondition && editCondition !== selectedItem.condition) {
-			updatedItem.condition = editCondition;
-			updateMessages.push(`Condition: ${editCondition}`);
+		// Check what needs to be updated
+		const conditionChanged = isEditingCondition && editCondition && editCondition !== selectedItem.condition;
+		const usabilityChanged = isEditingUsability && editUsability && editUsability !== selectedItem.usability;
+		const statusChanged = isEditingStatus && editStatus && editStatus !== selectedItem.status;
+
+		if (!conditionChanged && !usabilityChanged && !statusChanged) {
+			// No changes to save
+			setIsEditingCondition(false);
+			setIsEditingUsability(false);
+			setIsEditingStatus(false);
+			setHasChanges(false);
+			return;
 		}
 
-		// Update usability if changed
-		if (isEditingUsability && editUsability && editUsability !== selectedItem.usability) {
-			updatedItem.usability = editUsability;
-			updateMessages.push(`Usability: ${editUsability}`);
-		}
+		try {
+			setLoading(true);
 
-		// Update status if changed
-		if (isEditingStatus && editStatus && editStatus !== selectedItem.status) {
-			updatedItem.status = editStatus;
-			updateMessages.push(`Status: ${editStatus}`);
-		}
+			// Get admin user ID
+			const adminUser = JSON.parse(localStorage.getItem('admin_user'));
+			const adminUserId = adminUser?.id || 1;
 
-		if (updateMessages.length > 0) {
-			// Update the item in the list
-			setReturneeItems(items =>
-				items.map(item =>
-					item.id === selectedItem.id ? updatedItem : item
-				)
+			// Map display status to API inspection_status
+			const inspectionStatus = statusChanged && editStatus === 'INSPECTED' ? 'inspected' : null;
+
+			// Map condition from display format to database format
+			// Frontend uses: 'excellent', 'good', 'fair', 'damaged', 'lost'
+			// Database uses: 'excellent', 'good', 'fair', 'damaged', 'lost' (same)
+			const dbCondition = conditionChanged ? editCondition.toLowerCase() : null;
+
+			// Map usability to condition if changed (usability change should also update condition)
+			// Usability: 'Usable' -> condition 'good' or 'excellent'
+			// Usability: 'Partially Usable' -> condition 'fair'
+			// Usability: 'Not Usable' -> condition 'damaged'
+			let usabilityMappedCondition = null;
+			if (usabilityChanged && !conditionChanged) {
+				// Only map usability to condition if condition wasn't explicitly changed
+				if (editUsability === 'Usable') {
+					usabilityMappedCondition = (selectedItem.condition === 'excellent' || selectedItem.condition === 'Excellent') ? 'excellent' : 'good';
+				} else if (editUsability === 'Partially Usable') {
+					usabilityMappedCondition = 'fair';
+				} else if (editUsability === 'Not Usable') {
+					usabilityMappedCondition = 'damaged';
+				}
+			}
+
+			// Use condition from condition field if changed, otherwise use mapped condition from usability
+			const finalCondition = dbCondition || usabilityMappedCondition;
+
+			// Prepare API payload - only include fields that changed
+			const apiPayload = {
+				admin_user_id: adminUserId
+			};
+
+			if (statusChanged) {
+				apiPayload.inspection_status = inspectionStatus || 'pending_inspection';
+			}
+
+			if (finalCondition) {
+				apiPayload.condition = finalCondition;
+			}
+
+			// Call API to update inspection data
+			const response = await transactionApiIMS.updateInspectionStatus(
+				selectedItem.returnTransactionId,
+				apiPayload
 			);
 
-			// Update selected item
-			setSelectedItem(updatedItem);
+			if (response.success) {
+				// Update the item in the list
+				// Also update usability based on condition if condition changed
+				let updatedUsability = selectedItem.usability;
+				if (conditionChanged && !usabilityChanged) {
+					// Map condition to usability
+					if (editCondition === 'excellent' || editCondition === 'good') {
+						updatedUsability = 'Usable';
+					} else if (editCondition === 'fair') {
+						updatedUsability = 'Partially Usable';
+					} else if (editCondition === 'damaged' || editCondition === 'lost') {
+						updatedUsability = 'Not Usable';
+					}
+				}
 
-			// Show success notification
-			const message = `Updated ${updateMessages.join(', ')} for ${selectedItem.itemName}`;
-			showNotification(message, 'success');
+				const updatedItem = {
+					...selectedItem,
+					...(conditionChanged && { condition: editCondition }),
+					...(usabilityChanged && { usability: editUsability }),
+					...(conditionChanged && !usabilityChanged && { usability: updatedUsability }), // Update usability if condition changed
+					...(statusChanged && {
+						status: editStatus,
+						inspection_status: inspectionStatus || 'pending_inspection'
+					})
+				};
+
+				setReturneeItems(items =>
+					items.map(item =>
+						item.id === selectedItem.id ? updatedItem : item
+					)
+				);
+
+				// Update selected item
+				setSelectedItem(updatedItem);
+
+				// Build success message
+				if (conditionChanged) updateMessages.push(`Condition: ${editCondition}`);
+				if (usabilityChanged) updateMessages.push(`Usability: ${editUsability}`);
+				if (statusChanged) updateMessages.push(`Status: ${editStatus}`);
+
+				showNotification(`Updated ${updateMessages.join(', ')} for ${selectedItem.itemName}`, 'success');
+			} else {
+				showNotification(response.message || 'Failed to update inspection data', 'error');
+			}
+		} catch (error) {
+			console.error('❌ Error updating inspection data:', error);
+			showNotification('Failed to update inspection data', 'error');
+		} finally {
+			setLoading(false);
 		}
 
 		// Reset edit states
@@ -680,7 +801,9 @@ const ReturneeItemDashboard = () => {
 								className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
 							>
 								{conditions.map(condition => (
-									<option key={condition} value={condition}>{condition}</option>
+									<option key={condition} value={condition}>
+										{condition === 'All' ? 'All' : capitalizeCondition(condition)}
+									</option>
 								))}
 							</select>
 						</div>
@@ -837,13 +960,8 @@ const ReturneeItemDashboard = () => {
 													</select>
 												</div>
 											) : (
-												<span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-													item.condition === 'Good' ? 'bg-green-100 text-green-800' :
-													item.condition === 'Fair' ? 'bg-yellow-100 text-yellow-800' :
-													item.condition === 'Poor' ? 'bg-orange-100 text-orange-800' :
-													'bg-red-100 text-red-800'
-												}`}>
-													{item.condition}
+												<span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getConditionColor(item.condition)}`}>
+													{capitalizeCondition(item.condition)}
 												</span>
 											)}
 										</td>
@@ -873,11 +991,7 @@ const ReturneeItemDashboard = () => {
 											)}
 										</td>
 										<td className="w-20 px-2 py-2 whitespace-nowrap text-xs">
-											<span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-												item.status === 'Returned' ? 'bg-green-100 text-green-800' :
-												item.status === 'Damaged' ? 'bg-red-100 text-red-800' :
-												'bg-yellow-100 text-yellow-800'
-											}`}>
+											<span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(item.status)}`}>
 												{item.status}
 											</span>
 										</td>
@@ -891,25 +1005,6 @@ const ReturneeItemDashboard = () => {
 													<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 														<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 616 0z" />
 														<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-													</svg>
-												</button>
-												<button
-													onClick={() => handleEditCondition(item.id, item.condition)}
-													className="p-1 text-blue-600 hover:text-blue-900 transition-colors"
-													title="Edit condition"
-												>
-													<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-													</svg>
-												</button>
-												<button
-													onClick={() => handleEditUsability(item.id, item.usability)}
-													className="p-1 text-green-600 hover:text-green-900 transition-colors"
-													title="Edit usability"
-												>
-													<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-														<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-														<path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
 													</svg>
 												</button>
 											</div>
@@ -1033,10 +1128,10 @@ const ReturneeItemDashboard = () => {
 								<div className="flex items-center justify-between">
 									<div className="flex items-center space-x-3">
 										<div className={`w-3 h-3 rounded-full ${
-											selectedItem.status === 'Pending Inspection' ? 'bg-yellow-400' :
-											selectedItem.status === 'Inspected' ? 'bg-green-400' :
+											selectedItem.status === 'PENDING' || selectedItem.status === 'Pending Inspection' ? 'bg-yellow-400' :
+											selectedItem.status === 'INSPECTED' || selectedItem.status === 'Inspected' ? 'bg-green-400' :
 											selectedItem.status === 'Needs Repair' ? 'bg-orange-400' :
-											'bg-red-400'
+											'bg-gray-400'
 										}`}></div>
 										<div className="flex-1">
 											<p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Status</p>
@@ -1047,19 +1142,16 @@ const ReturneeItemDashboard = () => {
 														onChange={(e) => setEditStatus(e.target.value)}
 														className="text-sm font-bold border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 													>
-														<option value="Pending Inspection">Pending Inspection</option>
-														<option value="Inspected">Inspected</option>
-														<option value="Needs Repair">Needs Repair</option>
-														<option value="Damaged">Damaged</option>
+														<option value="PENDING">PENDING</option>
+														<option value="INSPECTED">INSPECTED</option>
 													</select>
 												</div>
 											) : (
 												<div className="flex items-center space-x-2">
 													<p className={`text-lg font-bold ${
-														selectedItem.status === 'Pending Inspection' ? 'text-yellow-700' :
-														selectedItem.status === 'Inspected' ? 'text-green-700' :
-														selectedItem.status === 'Needs Repair' ? 'text-orange-700' :
-														'text-red-700'
+														selectedItem.status === 'PENDING' || selectedItem.status === 'Pending Inspection' ? 'text-yellow-700' :
+														selectedItem.status === 'INSPECTED' || selectedItem.status === 'Inspected' ? 'text-green-700' :
+														'text-gray-700'
 													}`}>
 														{selectedItem.status}
 													</p>
@@ -1082,10 +1174,11 @@ const ReturneeItemDashboard = () => {
 								<div className="flex items-center justify-between">
 									<div className="flex items-center space-x-3">
 										<div className={`w-3 h-3 rounded-full ${
-											selectedItem.condition === 'Excellent' ? 'bg-blue-400' :
-											selectedItem.condition === 'Good' ? 'bg-green-400' :
-											selectedItem.condition === 'Fair' ? 'bg-yellow-400' :
-											'bg-red-400'
+											(selectedItem.condition?.toLowerCase() === 'excellent') ? 'bg-green-400' :
+											(selectedItem.condition?.toLowerCase() === 'good') ? 'bg-green-400' :
+											(selectedItem.condition?.toLowerCase() === 'fair') ? 'bg-gray-400' :
+											(selectedItem.condition?.toLowerCase() === 'damaged' || selectedItem.condition?.toLowerCase() === 'lost') ? 'bg-red-400' :
+											'bg-gray-400'
 										}`}></div>
 										<div className="flex-1">
 											<p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Condition</p>
@@ -1096,21 +1189,23 @@ const ReturneeItemDashboard = () => {
 														onChange={(e) => setEditCondition(e.target.value)}
 														className="text-sm font-bold border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 													>
-														<option value="Excellent">Excellent</option>
-														<option value="Good">Good</option>
-														<option value="Fair">Fair</option>
-														<option value="Poor">Poor</option>
+														<option value="excellent">Excellent</option>
+														<option value="good">Good</option>
+														<option value="fair">Fair</option>
+														<option value="damaged">Damaged</option>
+														<option value="lost">Lost</option>
 													</select>
 												</div>
 											) : (
 												<div className="flex items-center space-x-2">
 													<p className={`text-lg font-bold ${
-														selectedItem.condition === 'Excellent' ? 'text-blue-700' :
-														selectedItem.condition === 'Good' ? 'text-green-700' :
-														selectedItem.condition === 'Fair' ? 'text-yellow-700' :
-														'text-red-700'
+														(selectedItem.condition?.toLowerCase() === 'excellent') ? 'text-green-700' :
+														(selectedItem.condition?.toLowerCase() === 'good') ? 'text-green-700' :
+														(selectedItem.condition?.toLowerCase() === 'fair') ? 'text-gray-700' :
+														(selectedItem.condition?.toLowerCase() === 'damaged' || selectedItem.condition?.toLowerCase() === 'lost') ? 'text-red-700' :
+														'text-gray-700'
 													}`}>
-														{selectedItem.condition}
+														{capitalizeCondition(selectedItem.condition || 'good')}
 													</p>
 													<button
 														onClick={startEditCondition}
@@ -1174,7 +1269,7 @@ const ReturneeItemDashboard = () => {
 									</div>
 									<div className="bg-white rounded-lg p-3 shadow-sm">
 										<label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Email</label>
-										<p className="text-sm font-semibold text-gray-900">{selectedItem.returnerEmail}</p>
+										<p className="text-sm font-semibold text-gray-900">{selectedItem.returnerEmail && selectedItem.returnerEmail !== 'N/A' ? selectedItem.returnerEmail : 'No email provided'}</p>
 									</div>
 									<div className="bg-white rounded-lg p-3 shadow-sm">
 										<label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Usability</label>
@@ -1183,7 +1278,7 @@ const ReturneeItemDashboard = () => {
 												<select
 													value={editUsability}
 													onChange={(e) => setEditUsability(e.target.value)}
-													className="text-xs font-medium border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+													className="text-xs font-medium border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full"
 												>
 													<option value="Usable">Usable</option>
 													<option value="Partially Usable">Partially Usable</option>
@@ -1233,12 +1328,7 @@ const ReturneeItemDashboard = () => {
 									</div>
 									<div className="bg-white rounded-lg p-3 shadow-sm">
 										<label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Return Status</label>
-										<span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-											selectedItem.status === 'Pending Inspection' ? 'bg-yellow-100 text-yellow-800' :
-											selectedItem.status === 'Inspected' ? 'bg-green-100 text-green-800' :
-											selectedItem.status === 'Needs Repair' ? 'bg-orange-100 text-orange-800' :
-											'bg-red-100 text-red-800'
-										}`}>
+										<span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(selectedItem.status)}`}>
 											{selectedItem.status}
 										</span>
 									</div>

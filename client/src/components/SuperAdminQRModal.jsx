@@ -8,7 +8,7 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
     try {
       // Use download URL if available, otherwise fall back to display URL
       const downloadUrl = qrDownloadUrl || qrUrl;
-      
+
       // Check if downloadUrl is valid
       if (!downloadUrl) {
         throw new Error('QR URL is not available');
@@ -18,34 +18,34 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
         method: 'GET',
         mode: 'cors'
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const blob = await response.blob();
-      
+
       if (blob.size === 0) {
         throw new Error('Downloaded file is empty');
       }
-      
+
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      
+
       // Determine file extension based on content type
-      const fileExtension = blob.type.includes('svg') ? 'svg' : 
-                           blob.type.includes('png') ? 'png' : 
+      const fileExtension = blob.type.includes('svg') ? 'svg' :
+                           blob.type.includes('png') ? 'png' :
                            blob.type.includes('jpeg') ? 'jpg' : 'svg';
-      
+
       const idNumber = userData?.studentId || userData?.employeeId || userData?.empId || 'code';
       link.download = `QR_${idNumber}.${fileExtension}`;
-      
+
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      
+
       setIsSaved(true);
     } catch (error) {
       console.error('Download failed:', error);
@@ -69,20 +69,20 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
         <head>
           <title>QR Code - ${userData?.firstName} ${userData?.lastName}</title>
           <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              text-align: center; 
+            body {
+              font-family: Arial, sans-serif;
+              text-align: center;
               padding: 20px;
               margin: 0;
             }
-            .header { 
+            .header {
               margin-bottom: 30px;
               color: #059669;
             }
-            .qr-container { 
+            .qr-container {
               margin: 30px 0;
             }
-            .details { 
+            .details {
               margin-top: 30px;
               text-align: left;
               max-width: 400px;
@@ -92,15 +92,15 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
               padding: 20px;
               border-radius: 8px;
             }
-            .detail-row { 
+            .detail-row {
               margin: 8px 0;
               display: flex;
             }
-            .detail-label { 
+            .detail-label {
               font-weight: bold;
               width: 120px;
             }
-            img { 
+            img {
               border: 1px solid #d1d5db;
               border-radius: 8px;
             }
@@ -112,11 +112,11 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
             <h2>Welcome, ${userData?.firstName} ${userData?.lastName}!</h2>
             <p>${roleTitle} account has been registered successfully</p>
           </div>
-          
+
           <div class="qr-container">
             <img src="${qrUrl}" alt="QR Code" style="max-width: 200px;" />
           </div>
-          
+
           <div class="details">
             <h3>Registration Details:</h3>
             <div class="detail-row">
@@ -151,7 +151,7 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
         </body>
       </html>
     `);
-    
+
     printWindow.document.close();
     printWindow.print();
     setIsSaved(true);
@@ -167,11 +167,11 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
   const idValue = userData?.studentId || userData?.employeeId || userData?.empId;
 
   return (
-    <Modal 
-      isOpen={isOpen} 
+    <Modal
+      isOpen={isOpen}
       onClose={handleClose}
       title="✅ Registration Successful!"
-      showCloseButton={isSaved}
+      showCloseButton={true}
     >
       <div className="text-center">
         {/* Success Banner */}
@@ -192,13 +192,33 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
           </p>
         </div>
 
+        {/* Email Notification Info */}
+        <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-4 mb-6">
+          <div className="flex items-start space-x-3">
+            <div className="flex-shrink-0 mt-0.5">
+              <svg className="w-5 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h5 className="font-semibold text-blue-900 mb-1 text-sm">
+                📧 Email Sent Automatically
+              </h5>
+              <p className="text-blue-800 text-xs leading-relaxed">
+                Your registration information, including your credentials (ID, Email, Contact Number) and QR code, has been automatically sent to <strong>{userData?.email}</strong>.
+                Please check your email inbox. You can retrieve your QR code from the email anytime if needed.
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* QR Code Display */}
         <div className="bg-gray-50 rounded-lg p-6 mb-6">
           {qrUrl ? (
             <div className="text-center">
-              <img 
-                src={qrUrl} 
-                alt="Generated QR Code" 
+              <img
+                src={qrUrl}
+                alt="Generated QR Code"
                 className="mx-auto border border-gray-200 rounded-lg shadow-sm max-w-48"
                 onLoad={() => console.log('✅ QR Code loaded successfully')}
                 onError={(e) => {
@@ -257,7 +277,7 @@ const SuperAdminQRModal = ({ isOpen, onClose, qrUrl, qrDownloadUrl, userData, us
               Print
             </button>
           </div>
-          
+
           {isSaved && (
             <button
               onClick={handleClose}

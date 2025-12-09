@@ -7,6 +7,7 @@ use App\Models\InventoryCategory;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Cache;
 
 class CategoryController extends Controller
 {
@@ -16,14 +17,23 @@ class CategoryController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = InventoryCategory::query();
+            // Build cache key based on filters
+            $activeOnly = $request->has('active_only') && $request->active_only;
+            $cacheKey = 'categories:' . ($activeOnly ? 'active' : 'all');
 
-            // Filter by active status if requested
-            if ($request->has('active_only') && $request->active_only) {
-                $query->active();
-            }
+            // Cache for 1 hour (3600 seconds) - categories don't change frequently
+            $cacheDuration = 3600;
 
-            $categories = $query->orderBy('name')->get();
+            $categories = Cache::remember($cacheKey, $cacheDuration, function () use ($activeOnly) {
+                $query = InventoryCategory::query();
+
+                // Filter by active status if requested
+                if ($activeOnly) {
+                    $query->active();
+                }
+
+                return $query->orderBy('name')->get();
+            });
 
             return response()->json([
                 'success' => true,
@@ -32,11 +42,26 @@ class CategoryController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve categories',
-                'error' => $e->getMessage()
-            ], 500);
+            // Fallback to database if cache fails - ensures system keeps working
+            try {
+                $query = InventoryCategory::query();
+                if ($request->has('active_only') && $request->active_only) {
+                    $query->active();
+                }
+                $categories = $query->orderBy('name')->get();
+
+                return response()->json([
+                    'success' => true,
+                    'data' => $categories,
+                    'message' => 'Categories retrieved successfully'
+                ]);
+            } catch (\Exception $fallbackError) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to retrieve categories',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
         }
     }
 
@@ -92,6 +117,11 @@ class CategoryController extends Controller
         try {
             $category = InventoryCategory::create($request->all());
 
+            // Invalidate cache when category is created
+            Cache::forget('categories:all');
+            Cache::forget('categories:active');
+            Cache::forget('dashboard:category_stats');
+
             return response()->json([
                 'success' => true,
                 'message' => 'Category created successfully',
@@ -138,6 +168,11 @@ class CategoryController extends Controller
         try {
             $category->update($request->all());
 
+            // Invalidate cache when category is updated
+            Cache::forget('categories:all');
+            Cache::forget('categories:active');
+            Cache::forget('dashboard:category_stats');
+
             return response()->json([
                 'success' => true,
                 'message' => 'Category updated successfully',
@@ -178,6 +213,11 @@ class CategoryController extends Controller
             }
 
             $category->delete();
+
+            // Invalidate cache when category is deleted
+            Cache::forget('categories:all');
+            Cache::forget('categories:active');
+            Cache::forget('dashboard:category_stats');
 
             return response()->json([
                 'success' => true,

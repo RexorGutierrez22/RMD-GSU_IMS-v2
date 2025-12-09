@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
+const STORAGE_KEY = 'staffPrivacyModalClosed';
+
 const StaffRegistrationForm = () => {
   const navigate = useNavigate();
+  const isInitialMount = useRef(true);
+
+  // Always start with modal showing - this ensures modal appears first
+  const [showPrivacyModal, setShowPrivacyModal] = useState(true);
+
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -20,20 +27,229 @@ const StaffRegistrationForm = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
-  // Email OTP Verification States
+  // Password visibility states
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
+
+  // Real-time validation states
+  const [usernameChecking, setUsernameChecking] = useState(false);
+  const [usernameExists, setUsernameExists] = useState(false);
+  const [passwordMatch, setPasswordMatch] = useState(null); // null = not checked, true = match, false = no match
+  const [emailDomainValid, setEmailDomainValid] = useState(null); // null = not checked, true = valid, false = invalid
+
+  // Email Authentication Code Verification States
   const [showOtpModal, setShowOtpModal] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
   const [otpError, setOtpError] = useState('');
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
+  const [registrationId, setRegistrationId] = useState(null);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [remainingAttempts, setRemainingAttempts] = useState(5);
 
   const departments = [
     'Resource Management Division',
     'General Services Unit'
   ];
+
+  // On mount, ensure modal shows - don't check sessionStorage immediately
+  // This ensures modal always appears first when visiting /staff-register
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      // Always show modal on mount - sessionStorage will only be checked
+      // when user explicitly closes the modal
+      console.log('StaffRegistrationForm mounted - showing privacy modal');
+      setShowPrivacyModal(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - only run once on mount
+
+  // Memoize the close handler to prevent re-renders
+  const handleCloseModal = useCallback((e) => {
+    // Prevent any default behavior
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    // Save to sessionStorage first
+    try {
+      sessionStorage.setItem(STORAGE_KEY, 'true');
+    } catch (e) {
+      console.warn('Could not save to sessionStorage:', e);
+    }
+
+    // Then update state
+    setShowPrivacyModal(false);
+  }, []);
+
+  // Memoize the modal JSX to prevent re-renders
+  const modalContent = useMemo(() => {
+    if (!showPrivacyModal) return null;
+
+    return (
+      <div
+        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: '100%',
+          height: '100%'
+        }}
+      >
+        <div
+          className="bg-white rounded-2xl shadow-2xl max-w-md w-full transform transition-all animate-privacy-modal-fade-in relative"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {/* Close button */}
+          <button
+            onClick={handleCloseModal}
+            type="button"
+            className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors z-10 bg-white rounded-full p-1 hover:bg-gray-100"
+            aria-label="Close"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+
+          {/* Modal Content */}
+          <div className="p-8">
+            {/* Icon Section */}
+            <div className="flex justify-center mb-6">
+              <div className="relative">
+                {/* Shield Background */}
+                <div className="w-24 h-24 bg-red-800 rounded-full flex items-center justify-center shadow-lg">
+                  <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                </div>
+                {/* Device Icons - Desktop */}
+                <div className="absolute -top-2 -left-2 w-8 h-8 bg-yellow-400 rounded-lg flex items-center justify-center opacity-80 transform rotate-12">
+                  <svg className="w-5 h-5 text-yellow-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                {/* Device Icons - Laptop */}
+                <div className="absolute -bottom-2 -right-2 w-7 h-7 bg-yellow-400 rounded flex items-center justify-center opacity-80 transform -rotate-12">
+                  <svg className="w-4 h-4 text-yellow-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                {/* Device Icons - Mobile */}
+                <div className="absolute top-1/2 -right-3 w-6 h-6 bg-yellow-400 rounded flex items-center justify-center opacity-80 transform translate-y-1/2">
+                  <svg className="w-3.5 h-3.5 text-yellow-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* Text Content */}
+            <div className="text-center mb-6">
+              <h3 className="text-2xl font-bold text-gray-900 mb-3">
+                Data Privacy Statement
+              </h3>
+              <p className="text-gray-600 text-sm leading-relaxed">
+                By continuing to browse this website, you agree to the{' '}
+                <strong className="text-red-800">University of Southeastern Philippines</strong> Data Privacy Statement.
+              </p>
+              <p className="text-gray-600 text-sm mt-3">
+                The full text of The Statement can be accessed through this{' '}
+                <a
+                  href="https://www.usep.edu.ph/usep-data-privacy-statement/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-red-800 hover:text-red-900 font-semibold underline transition-colors"
+                >
+                  link
+                </a>
+                .
+              </p>
+            </div>
+
+            {/* Accept Button */}
+            <button
+              onClick={handleCloseModal}
+              type="button"
+              className="w-full bg-red-800 hover:bg-red-900 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg transform hover:scale-[1.02]"
+            >
+              I Understand and Agree
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }, [showPrivacyModal, handleCloseModal]);
+
+  // Check username uniqueness
+  const checkUsernameAvailability = async (username) => {
+    if (!username || username.length < 3) {
+      setUsernameExists(false);
+      setUsernameChecking(false);
+      return;
+    }
+
+    setUsernameChecking(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/admin-registrations/check-username', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ username })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setUsernameExists(data.username_exists);
+        if (data.username_exists) {
+          setErrors(prev => ({
+            ...prev,
+            username: 'Username is already taken'
+          }));
+        } else {
+          setErrors(prev => {
+            const newErrors = { ...prev };
+            if (newErrors.username === 'Username is already taken') {
+              delete newErrors.username;
+            }
+            return newErrors;
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error checking username:', error);
+    } finally {
+      setUsernameChecking(false);
+    }
+  };
+
+  // Debounce function for username checking
+  const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  };
+
+  // Debounced username checker
+  const debouncedCheckUsername = useMemo(
+    () => debounce(checkUsernameAvailability, 500),
+    []
+  );
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -54,6 +270,61 @@ const StaffRegistrationForm = () => {
         ...prev,
         [name]: value
       }));
+    }
+
+    // Real-time username checking
+    if (name === 'username') {
+      debouncedCheckUsername(value);
+    }
+
+    // Real-time email domain validation
+    if (name === 'email') {
+      if (value) {
+        const isValidDomain = value.toLowerCase().endsWith('@usep.edu.ph');
+        setEmailDomainValid(isValidDomain);
+        if (!isValidDomain) {
+          setErrors(prev => ({
+            ...prev,
+            email: 'Only USEP institutional email addresses (@usep.edu.ph) are allowed'
+          }));
+        } else {
+          setErrors(prev => {
+            const newErrors = { ...prev };
+            if (newErrors.email === 'Only USEP institutional email addresses (@usep.edu.ph) are allowed') {
+              delete newErrors.email;
+            }
+            return newErrors;
+          });
+        }
+      } else {
+        setEmailDomainValid(null);
+      }
+    }
+
+    // Real-time password match checking
+    if (name === 'password' || name === 'password_confirmation') {
+      const password = name === 'password' ? value : formData.password;
+      const confirmPassword = name === 'password_confirmation' ? value : formData.password_confirmation;
+
+      if (confirmPassword && password) {
+        setPasswordMatch(password === confirmPassword);
+        if (password !== confirmPassword) {
+          setErrors(prev => ({
+            ...prev,
+            password_confirmation: 'Passwords do not match'
+          }));
+        } else {
+          setErrors(prev => {
+            const newErrors = { ...prev };
+            if (newErrors.password_confirmation === 'Passwords do not match') {
+              delete newErrors.password_confirmation;
+            }
+            return newErrors;
+          });
+        }
+      } else {
+        setPasswordMatch(null);
+      }
     }
 
     // Clear error when user starts typing
@@ -124,14 +395,9 @@ const StaffRegistrationForm = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Generate 6-digit OTP
-  const generateOTP = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
-
-  // Send OTP via Email (using simple backend endpoint)
+  // Send Email Authentication Code via Email (using Laravel Mail facade)
   const sendOTP = async () => {
-    console.log('sendOTP called with email:', formData.email);
+    console.log('Sending email authentication code to:', formData.email);
 
     if (!formData.email) {
       setOtpError('Please enter your email address first');
@@ -163,12 +429,8 @@ const StaffRegistrationForm = () => {
     setOtpError('');
 
     try {
-      const otp = generateOTP();
-      setGeneratedOtp(otp);
-      console.log('Generated OTP:', otp);
-
-      console.log('Sending OTP to backend...');
-      // Send OTP to backend
+      console.log('Sending email authentication code request to backend...');
+      // Send email authentication code request to backend - backend will generate and send verification code
       const response = await fetch('http://localhost:8000/api/admin-registrations/send-otp', {
         method: 'POST',
         headers: {
@@ -176,8 +438,8 @@ const StaffRegistrationForm = () => {
         },
         body: JSON.stringify({
           email: formData.email,
-          otp_code: otp,
-          full_name: formData.full_name || 'User'
+          full_name: formData.full_name || 'User',
+          username: formData.username || ''
         })
       });
 
@@ -187,45 +449,24 @@ const StaffRegistrationForm = () => {
       if (data.success) {
         setOtpSent(true);
         setShowOtpModal(true);
+        setRegistrationId(data.registration_id);
         startResendTimer();
-        console.log('OTP modal should now be visible');
-
-        // Development mode: Show OTP in alert
-        if (data.dev_mode && data.otp_code) {
-          toast.info(
-            <div>
-              <strong>🔧 DEVELOPMENT MODE</strong>
-              <p className="mt-2">OTP sent successfully!</p>
-              <p className="mt-2 text-2xl font-bold text-yellow-300">🔑 {data.otp_code}</p>
-              <p className="mt-2 text-xs opacity-75">(Email not actually sent in dev mode)</p>
-              <p className="mt-1 text-xs opacity-75">Enter this code in the modal</p>
-            </div>,
-            {
-              position: "top-center",
-              autoClose: 15000,
-              hideProgressBar: false,
-              closeOnClick: false,
-              pauseOnHover: true,
-              draggable: true
-            }
-          );
-        } else {
-          toast.success('✅ OTP sent to your email! Please check your inbox and enter the 6-digit code.', {
-            position: "top-right",
-            autoClose: 5000
-          });
-        }
+        console.log('Email authentication modal should now be visible');
+        toast.success('Email authentication code sent! Please check your inbox.', {
+          position: "top-right",
+          autoClose: 5000
+        });
       } else {
-        const errorMsg = data.message || 'Failed to send OTP';
+        const errorMsg = data.message || 'Failed to send email authentication code';
         setOtpError(errorMsg);
         toast.error(errorMsg, {
           position: "top-right",
           autoClose: 4000
         });
-        console.error('OTP send failed:', data);
+        console.error('Email authentication code send failed:', data);
       }
     } catch (error) {
-      console.error('Error sending OTP:', error);
+      console.error('Error sending email authentication code:', error);
       const errorMsg = 'Network error. Please ensure the backend server is running on port 8000.';
       setOtpError(errorMsg);
       toast.error(errorMsg, {
@@ -251,31 +492,83 @@ const StaffRegistrationForm = () => {
     }, 1000);
   };
 
-  // Verify OTP
-  const verifyOTP = () => {
-    console.log('Verifying OTP. Entered:', otpCode, 'Expected:', generatedOtp);
+  // Verify Email Authentication Code via API
+  const verifyOTP = async () => {
+    if (!otpCode || otpCode.length !== 6) {
+      setOtpError('Please enter a 6-digit email authentication code');
+      return;
+    }
+
     setIsVerifyingOtp(true);
     setOtpError('');
 
-    if (otpCode === generatedOtp) {
-      console.log('✅ OTP verified successfully! Proceeding with registration...');
-      setIsVerifyingOtp(false);
-      setShowOtpModal(false);
-      toast.success('✅ OTP verified! Submitting registration...', {
-        position: "top-right",
-        autoClose: 2000
+    try {
+      console.log('Verifying email authentication code via API...');
+      const response = await fetch('http://localhost:8000/api/admin-registrations/verify-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          verification_code: otpCode
+        })
       });
-      // Proceed with registration
-      submitRegistration();
-    } else {
+
+      const data = await response.json();
+      console.log('Verification response:', data);
+
+      if (data.success && data.email_verified) {
+        console.log('✅ Email authentication code verified successfully! Proceeding with registration...');
+        setIsVerifyingOtp(false);
+        setShowOtpModal(false);
+        setEmailVerified(true);
+        setOtpCode('');
+        toast.success('✅ Email authenticated! Submitting registration...', {
+          position: "top-right",
+          autoClose: 2000
+        });
+        // Proceed with registration
+        submitRegistration();
+      } else {
+        setIsVerifyingOtp(false);
+        const errorMsg = data.message || 'Invalid email authentication code. Please try again.';
+        setOtpError(errorMsg);
+        setRemainingAttempts(data.remaining_attempts || 0);
+
+        if (data.max_attempts_reached) {
+          toast.error('Maximum verification attempts reached. Please register again.', {
+            position: "top-right",
+            autoClose: 5000
+          });
+          // Reset form
+          setOtpSent(false);
+          setShowOtpModal(false);
+          setOtpCode('');
+        } else if (data.code_expired) {
+          toast.error('Email authentication code has expired. Please request a new code.', {
+            position: "top-right",
+            autoClose: 4000
+          });
+          setOtpSent(false);
+          setResendTimer(0);
+        } else {
+          toast.error(errorMsg, {
+            position: "top-right",
+            autoClose: 4000
+          });
+        }
+        console.error('Email authentication code verification failed:', errorMsg);
+      }
+    } catch (error) {
       setIsVerifyingOtp(false);
-      const errorMsg = 'Invalid OTP code. Please try again.';
+      const errorMsg = 'Failed to verify email authentication code. Please try again.';
       setOtpError(errorMsg);
-      toast.error(`Invalid OTP code. Please check and try again.`, {
+      toast.error(errorMsg, {
         position: "top-right",
         autoClose: 4000
       });
-      console.error('OTP mismatch');
+      console.error('Email authentication code verification error:', error);
     }
   };
 
@@ -294,13 +587,13 @@ const StaffRegistrationForm = () => {
       return;
     }
 
-    console.log('Form validation passed. Sending OTP...');
+    console.log('Form validation passed. Sending email authentication code...');
 
-    // Trigger OTP verification
+    // Trigger email authentication code verification
     if (!otpSent) {
       await sendOTP();
     } else {
-      console.log('OTP already sent, showing modal...');
+      console.log('Email authentication code already sent, showing modal...');
       setShowOtpModal(true);
     }
   };
@@ -348,7 +641,7 @@ const StaffRegistrationForm = () => {
         });
         setOtpSent(false);
         setOtpCode('');
-        setGeneratedOtp('');
+        setEmailVerified(false);
       } else {
         console.error('Registration failed:', data);
         if (data.errors) {
@@ -418,6 +711,9 @@ const StaffRegistrationForm = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 lg:p-8 overflow-hidden" style={{backgroundColor: '#e5e7eb'}}>
+      {/* Privacy Modal Overlay - shows on top of registration form */}
+      {modalContent}
+
       <div className="w-full max-w-7xl h-[95vh] flex flex-col lg:flex-row bg-white rounded-3xl shadow-2xl overflow-hidden">
 
         {/* Left Side - Registration Form */}
@@ -534,16 +830,34 @@ const StaffRegistrationForm = () => {
                     </svg>
                     USEP Email *
                   </label>
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    className={`w-full px-3 py-2 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
-                      errors.email ? 'border-red-500 bg-red-50' : 'border-gray-200 group-hover:border-blue-300'
-                    }`}
-                    placeholder="your.name@usep.edu.ph"
-                  />
+                  <div className="relative">
+                    <input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      autoComplete="email"
+                      className={`w-full px-3 py-2 pr-10 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
+                        errors.email || (emailDomainValid === false) ? 'border-red-500 bg-red-50' :
+                        emailDomainValid === true ? 'border-green-500 bg-green-50' :
+                        'border-gray-200 group-hover:border-blue-300'
+                      }`}
+                      placeholder="your.name@usep.edu.ph"
+                    />
+                    {formData.email && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        {emailDomainValid === false ? (
+                          <svg className="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                          </svg>
+                        ) : emailDomainValid === true ? (
+                          <svg className="h-4 w-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          </svg>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
                   {errors.email && (
                     <p className="text-red-500 text-xs mt-1 flex items-center">
                       <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
@@ -552,22 +866,65 @@ const StaffRegistrationForm = () => {
                       {errors.email}
                     </p>
                   )}
+                  {!errors.email && formData.email && emailDomainValid === false && (
+                    <p className="text-red-500 text-xs mt-1 flex items-center">
+                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                      Only USEP institutional email addresses (@usep.edu.ph) are allowed
+                    </p>
+                  )}
+                  {!errors.email && formData.email && emailDomainValid === true && (
+                    <p className="text-green-500 text-xs mt-1 flex items-center">
+                      <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      Valid USEP email address
+                    </p>
+                  )}
                 </div>
 
                 <div className="group">
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Username *
                   </label>
-                  <input
-                    type="text"
-                    name="username"
-                    value={formData.username}
-                    onChange={handleChange}
-                    className={`w-full px-3 py-2 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
-                      errors.username ? 'border-red-500 bg-red-50' : 'border-gray-200 group-hover:border-blue-300'
-                    }`}
-                    placeholder="Choose a username"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      name="username"
+                      value={formData.username}
+                      onChange={handleChange}
+                      autoComplete="username"
+                      className={`w-full px-3 py-2 pr-10 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
+                        errors.username || usernameExists ? 'border-red-500 bg-red-50' :
+                        usernameChecking ? 'border-yellow-400 bg-yellow-50' :
+                        formData.username && !usernameExists && formData.username.length >= 3 ? 'border-green-500 bg-green-50' :
+                        'border-gray-200 group-hover:border-blue-300'
+                      }`}
+                      placeholder="Choose a username"
+                    />
+                    {usernameChecking && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <svg className="animate-spin h-4 w-4 text-yellow-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                      </div>
+                    )}
+                    {!usernameChecking && formData.username && formData.username.length >= 3 && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        {usernameExists ? (
+                          <svg className="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                          </svg>
+                        ) : (
+                          <svg className="h-4 w-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   {errors.username && (
                     <p className="text-red-500 text-xs mt-1 flex items-center">
                       <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
@@ -576,22 +933,60 @@ const StaffRegistrationForm = () => {
                       {errors.username}
                     </p>
                   )}
+                  {!errors.username && formData.username && formData.username.length >= 3 && !usernameChecking && (
+                    <p className={`text-xs mt-1 flex items-center ${usernameExists ? 'text-red-500' : 'text-green-500'}`}>
+                      {usernameExists ? (
+                        <>
+                          <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                          </svg>
+                          Username is already taken
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          </svg>
+                          Username is available
+                        </>
+                      )}
+                    </p>
+                  )}
                 </div>
 
                 <div className="group">
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Password *
                   </label>
-                  <input
-                    type="password"
-                    name="password"
-                    value={formData.password}
-                    onChange={handleChange}
-                    className={`w-full px-3 py-2 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
-                      errors.password ? 'border-red-500 bg-red-50' : 'border-gray-200 group-hover:border-blue-300'
-                    }`}
-                    placeholder="Create a strong password"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      autoComplete="new-password"
+                      className={`w-full px-3 py-2 pr-10 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
+                        errors.password ? 'border-red-500 bg-red-50' : 'border-gray-200 group-hover:border-blue-300'
+                      }`}
+                      placeholder="Create a strong password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    >
+                      {showPassword ? (
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                   {errors.password && (
                     <p className="text-red-500 text-xs mt-1 flex items-center">
                       <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
@@ -606,22 +1001,62 @@ const StaffRegistrationForm = () => {
                   <label className="block text-xs font-semibold text-gray-700 mb-1">
                     Confirm Password *
                   </label>
-                  <input
-                    type="password"
-                    name="password_confirmation"
-                    value={formData.password_confirmation}
-                    onChange={handleChange}
-                    className={`w-full px-3 py-2 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
-                      errors.password_confirmation ? 'border-red-500 bg-red-50' : 'border-gray-200 group-hover:border-blue-300'
-                    }`}
-                    placeholder="Confirm your password"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPasswordConfirmation ? "text" : "password"}
+                      name="password_confirmation"
+                      value={formData.password_confirmation}
+                      onChange={handleChange}
+                      autoComplete="new-password"
+                      className={`w-full px-3 py-2 pr-10 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-300 ${
+                        errors.password_confirmation || (passwordMatch === false) ? 'border-red-500 bg-red-50' :
+                        passwordMatch === true ? 'border-green-500 bg-green-50' :
+                        'border-gray-200 group-hover:border-blue-300'
+                      }`}
+                      placeholder="Confirm your password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswordConfirmation(!showPasswordConfirmation)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                    >
+                      {showPasswordConfirmation ? (
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                   {errors.password_confirmation && (
                     <p className="text-red-500 text-xs mt-1 flex items-center">
                       <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                       </svg>
                       {errors.password_confirmation}
+                    </p>
+                  )}
+                  {!errors.password_confirmation && formData.password_confirmation && formData.password && (
+                    <p className={`text-xs mt-1 flex items-center ${passwordMatch ? 'text-green-500' : 'text-red-500'}`}>
+                      {passwordMatch ? (
+                        <>
+                          <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          </svg>
+                          Passwords match
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                          </svg>
+                          Passwords do not match
+                        </>
+                      )}
                     </p>
                   )}
                 </div>
@@ -890,12 +1325,12 @@ const StaffRegistrationForm = () => {
               </div>
               <h3 className="text-2xl font-bold text-gray-900 mb-2">Verify Your Email</h3>
               <p className="text-sm text-gray-600 mb-6">
-                We've sent a 6-digit code to <strong>{formData.email}</strong>
+                We've sent a 6-digit email authentication code to <strong>{formData.email}</strong> to verify your email address and confirm its legitimacy.
               </p>
 
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Enter OTP Code
+                  Enter Email Authentication Code
                 </label>
                 <input
                   type="text"
@@ -962,14 +1397,14 @@ const StaffRegistrationForm = () => {
                       <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      Resend OTP in {resendTimer}s
+                      Resend Code in {resendTimer}s
                     </span>
                   ) : (
                     <span className="flex items-center justify-center">
                       <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                       </svg>
-                      Resend OTP
+                      Resend Code
                     </span>
                   )}
                 </button>
@@ -993,7 +1428,7 @@ const StaffRegistrationForm = () => {
                   </svg>
                   <div>
                     <p className="font-semibold text-gray-700 mb-1">Didn't receive the code?</p>
-                    <p className="text-xs">Check your spam folder or click "Resend OTP"</p>
+                    <p className="text-xs">Check your spam folder or click "Resend Code"</p>
                   </div>
                 </div>
               </div>

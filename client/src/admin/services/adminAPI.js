@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://127.0.0.1:8001/api';
+const BASE_URL = 'http://localhost:8000/api';
 
 // Create axios instance for admin API calls
 const adminAPI = axios.create({
@@ -8,6 +8,7 @@ const adminAPI = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 10000, // 10 second timeout for all requests
 });
 
 // Add token to requests automatically
@@ -28,13 +29,13 @@ export const adminAuth = {
         username: credentials.email || credentials.username, // Accept both email and username
         password: credentials.password
       });
-      
+
       // Store token on successful login
       if (response.data.token) {
         localStorage.setItem('admin_token', response.data.token);
         localStorage.setItem('admin_user', JSON.stringify(response.data.admin));
       }
-      
+
       return response.data;
     } catch (error) {
       console.error('Login error:', error);
@@ -89,6 +90,47 @@ export const adminAuth = {
   // Set admin token
   setToken: (token) => {
     localStorage.setItem('admin_token', token);
+  },
+
+  // Upload profile image
+  uploadProfileImage: async (imageFile) => {
+    try {
+      const formData = new FormData();
+      formData.append('image', imageFile);
+
+      const response = await adminAPI.post('/admin/upload-profile-image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return {
+        success: true,
+        data: response.data.data || response.data,
+        message: response.data.message || 'Profile image uploaded successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to upload profile image',
+        errors: error.response?.data?.errors || {}
+      };
+    }
+  },
+
+  // Delete profile image
+  deleteProfileImage: async () => {
+    try {
+      const response = await adminAPI.delete('/admin/delete-profile-image');
+      return {
+        success: true,
+        message: response.data.message || 'Profile image deleted successfully'
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to delete profile image'
+      };
+    }
   }
 };
 

@@ -21,3 +21,5 @@ export { default as ReturnVerificationLounge } from './ReturnVerificationLounge'
 export { default as InventoryDashboard } from './InventoryDashboard';
 export { default as CalendarDashboard } from './CalendarDashboard';
 export { default as ReturneeItemDashboard } from './ReturneeItemDashboard';
+export { default as PerformanceDashboard } from './PerformanceDashboard';
+export { default as OurTeam } from './OurTeam';

@@ -11,6 +11,12 @@ This is a **Dockerized test setup** for the Resource Management Division Invento
 
 ## 🚀 Quick Start Guide
 
+### Prerequisites
+- PHP 8.1+ with Composer
+- Node.js 18+ with npm
+- MySQL 8.0+ (or XAMPP)
+- Git
+
 ### 1. 📥 Clone this repository
 
 ```bash
@@ -18,22 +24,40 @@ git clone https://github.com/RexorGutierrez22/RMD-GSU_IMS.git
 cd RMD-GSU_IMS
 ```
 
-### 2. ▶️ Run the full system with Docker
+### 2. 🔧 Backend Setup
 
 ```bash
-docker-compose up --build
+cd server
+composer install
+cp .env.example .env
+php artisan key:generate
+php artisan migrate
+php artisan serve --port=8000
 ```
 
-This starts:
-- Laravel backend: [http://localhost:8000](http://localhost:8000)
-- React frontend: [http://localhost:3000](http://localhost:3000)
-- MySQL database: localhost:3306
-
-### 3. 🔑 Generate Laravel App Key (First time only)
+### 3. 🎨 Frontend Setup
 
 ```bash
-docker-compose exec app php artisan key:generate
-docker-compose exec app php artisan migrate
+cd client
+npm install
+npm run dev
+```
+
+The system will be available at:
+- Frontend: [http://localhost:3010](http://localhost:3010)
+- Backend API: [http://localhost:8000](http://localhost:8000)
+
+### 4. 📊 Database Setup
+
+Ensure MySQL is running and create the database:
+```sql
+CREATE DATABASE rmd_inventory CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+Then run migrations:
+```bash
+cd server
+php artisan migrate
 ```
 
 ---
@@ -84,8 +108,7 @@ DB_PASSWORD=laravel
 
 ---
 
-<<<<<<< HEAD
-## � Development Notes
+## 🛠 Development Notes
 
 - Make sure Docker Desktop is running before starting the system
 - All services run in isolated containers:
@@ -94,34 +117,21 @@ DB_PASSWORD=laravel
   - Database: MySQL 8.0
 - No need to install PHP, Node.js, or MySQL locally
 - API endpoints are accessible at `http://localhost:8000/api`
-- Frontend dev server runs at `http://localhost:3000`
+- Frontend dev server runs at `http://localhost:3010`
 
 ### Available API Endpoints
 
 - POST `/api/login` - User authentication
 - POST `/api/logout` - User logout (requires auth)
-- POST `/api/employees` - Create employee
+- GET `/api/inventory` - Get inventory items
+- POST `/api/transactions/borrow` - Create borrow request
+- And many more...
 
 ---
 
 ## ⚠️ Important Reminders
 
-- This is a test repository for Docker implementation
-- Always check Docker logs if services aren't responding
+- Always check logs if services aren't responding
 - Use `docker-compose down` to stop all services
 - Use `docker-compose up -d` for detached mode
-
-PLEASE READ AND FOLLOW THIS GUIDE CAREFULLY!
-=======
-## 🛠 Notes
-
-- This is a test repo only. You can merge the Docker setup into the main project once verified.
-- Make sure Docker Desktop is installed before running the system.
-- You don’t need to install PHP, Node, MySQL manually.
-
----
-
-PLEASE FOLLOW AND READ LANG NINYO NI GOIS !
-
-
->>>>>>> 31bbe42fa3256a18e3552be11a90342810708882
+- Check `EMAIL-TESTING.md` for email notification setup

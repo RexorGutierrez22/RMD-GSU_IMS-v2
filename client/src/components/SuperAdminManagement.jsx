@@ -30,7 +30,8 @@ const SuperAdminManagement = () => {
         ? '/api/admin-registrations/pending'
         : '/api/admin-registrations/history';
 
-      const response = await fetch(`http://localhost:8001${endpoint}`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('super_admin_token')}`,
           'Content-Type': 'application/json'
@@ -54,7 +55,8 @@ const SuperAdminManagement = () => {
     setProcessing(prev => ({ ...prev, [registrationId]: 'approving' }));
 
     try {
-      const response = await fetch(`http://localhost:8001/api/admin-registrations/${registrationId}/approve`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${API_BASE_URL}/admin-registrations/${registrationId}/approve`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('super_admin_token')}`,
@@ -87,7 +89,8 @@ const SuperAdminManagement = () => {
     setProcessing(prev => ({ ...prev, [rejectModal.registration.id]: 'rejecting' }));
 
     try {
-      const response = await fetch(`http://localhost:8001/api/admin-registrations/${rejectModal.registration.id}/reject`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${API_BASE_URL}/admin-registrations/${rejectModal.registration.id}/reject`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('super_admin_token')}`,
@@ -116,7 +119,8 @@ const SuperAdminManagement = () => {
   const loadCategories = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8001/api/categories', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${API_BASE_URL}/categories`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_token')}`,
           'Content-Type': 'application/json'
@@ -144,8 +148,8 @@ const SuperAdminManagement = () => {
 
     try {
       const url = categoryModal.category
-        ? `http://localhost:8001/api/categories/${categoryModal.category.id}`
-        : 'http://localhost:8001/api/categories';
+        ? `${API_BASE_URL}/categories/${categoryModal.category.id}`
+        : `${API_BASE_URL}/categories`;
 
       const method = categoryModal.category ? 'PUT' : 'POST';
 
@@ -181,7 +185,8 @@ const SuperAdminManagement = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost:8001/api/categories/${categoryId}`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${API_BASE_URL}/categories/${categoryId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_token')}`,
@@ -206,7 +211,8 @@ const SuperAdminManagement = () => {
   const loadLocations = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8001/api/locations', {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${API_BASE_URL}/locations`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_token')}`,
           'Content-Type': 'application/json'
@@ -234,8 +240,8 @@ const SuperAdminManagement = () => {
 
     try {
       const url = locationModal.location
-        ? `http://localhost:8001/api/locations/${locationModal.location.id}`
-        : 'http://localhost:8001/api/locations';
+        ? `${API_BASE_URL}/locations/${locationModal.location.id}`
+        : `${API_BASE_URL}/locations`;
 
       const method = locationModal.location ? 'PUT' : 'POST';
 
@@ -271,7 +277,8 @@ const SuperAdminManagement = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost:8001/api/locations/${locationId}`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+      const response = await fetch(`${API_BASE_URL}/locations/${locationId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('admin_token')}`,

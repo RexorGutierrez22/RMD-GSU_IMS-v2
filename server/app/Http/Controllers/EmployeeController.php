@@ -6,6 +6,10 @@ use App\Models\Employee;
 use Illuminate\Http\Request;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\EmployeeRegistrationMail;
+use App\Mail\EmployeeVerificationMail;
+use Carbon\Carbon;
 
 class EmployeeController extends Controller
 {
@@ -74,7 +78,10 @@ class EmployeeController extends Controller
             ], 500);
         }
 
-        // Create employee record
+        // Generate 6-digit verification code
+        $verificationCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        // Create employee record with unverified status
         $employee = Employee::create([
             'first_name' => $validatedData['first_name'],
             'last_name' => $validatedData['last_name'],
@@ -84,60 +91,45 @@ class EmployeeController extends Controller
             'position' => $validatedData['position'],
             'department' => $validatedData['department'],
             'contact_number' => $validatedData['contact'],  // Map contact to contact_number
-            'status' => 'active'                            // Default status
+            'status' => 'inactive',  // Set to inactive until email is verified
+            'email_verification_code' => $verificationCode,
+            'verification_code_expires_at' => Carbon::now()->addMinutes(15),
+            'verification_attempts' => 0
         ]);
 
-        // Generate QR code with employee data
-        $qrData = [
-            'type' => 'employee',
-            'id' => $employee->id,
-            'emp_id' => $employee->emp_id,
-            'name' => $employee->first_name . ' ' . $employee->last_name,
-            'email' => $employee->email,
-            'department' => $employee->department,
-            'contact_number' => $employee->contact_number
-        ];
+        // Send verification email
+        try {
+            Mail::to($employee->email)->send(new EmployeeVerificationMail($employee, $verificationCode));
+            \Log::info('Verification email sent successfully', [
+                'employee_id' => $employee->id,
+                'email' => $employee->email
+            ]);
+        } catch (\Exception $e) {
+            // Log email error and delete the employee record
+            \Log::error('Failed to send verification email', [
+                'employee_id' => $employee->id,
+                'email' => $employee->email,
+                'error' => $e->getMessage()
+            ]);
 
-        // Create QR code as SVG (no external dependencies)
-        $qrCodeSvg = QrCode::format('svg')
-            ->size(200)
-            ->margin(2)
-            ->generate(json_encode($qrData));
+            // Delete the employee record if email fails
+            $employee->delete();
 
-        // Save the SVG QR code
-        $qrFileName = 'Employee_' . $employee->emp_id . '_' . $employee->first_name . '_' . $employee->last_name . '.svg';
-        $qrPath = 'qr_codes/employees/' . $qrFileName;
-
-        // Ensure qr_codes/employees directory exists
-        if (!file_exists(public_path('qr_codes/employees'))) {
-            mkdir(public_path('qr_codes/employees'), 0755, true);
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to send verification email. Please try again.',
+                'error' => 'Email service unavailable'
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                 ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                 ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
-
-        // Save the SVG QR code
-        file_put_contents(public_path($qrPath), $qrCodeSvg);
-
-        // Update employee record with QR code information
-        $employee->update([
-            'qr_code_path' => $qrPath,
-            'qr_code' => json_encode($qrData)  // Store QR data as JSON
-        ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Employee registered successfully!',
-            'employee' => [
-                'id' => $employee->id,
-                'emp_id' => $employee->emp_id,
-                'name' => $employee->first_name . ' ' . $employee->last_name,
-                'email' => $employee->email,
-                'position' => $employee->position,
-                'department' => $employee->department,
-                'contact' => $employee->contact_number,  // Use contact_number field
-                'qr_code_path' => $employee->qr_code_path,
-                'qr_code_data' => $qrData
-            ],
-            'qr_url' => url("api/qr-display/employees/{$qrFileName}"),
-            'qr_download_url' => url("api/download-qr/employees/{$qrFileName}") // Download the SVG QR code
+            'message' => 'Registration submitted! Please check your email for the verification code.',
+            'requires_verification' => true,
+            'employee_id' => $employee->id,
+            'email' => $employee->email
         ], 201)->header('Access-Control-Allow-Origin', '*')
              ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
@@ -257,7 +249,7 @@ class EmployeeController extends Controller
     public function index(Request $request)
     {
         try {
-            $employees = Employee::select([
+            $employees = Employee::notArchived()->select([
                 'id', 'first_name', 'last_name', 'middle_name',
                 'email', 'emp_id', 'department', 'position', 'contact_number',
                 'qr_code_path', 'status', 'created_at'
@@ -502,6 +494,279 @@ class EmployeeController extends Controller
             $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
             return $response;
+        }
+    }
+
+    /**
+     * Verify email with verification code
+     */
+    public function verifyEmail(Request $request)
+    {
+        try {
+            $request->validate([
+                'employee_id' => 'required|integer',
+                'verification_code' => 'required|string|size:6'
+            ]);
+
+            $employee = Employee::find($request->employee_id);
+
+            if (!$employee) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Employee not found.'
+                ], 404)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Check if already verified
+            if ($employee->email_verified_at) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email already verified.',
+                    'already_verified' => true
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Check if code expired
+            if ($employee->verification_code_expires_at && Carbon::now()->gt($employee->verification_code_expires_at)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Verification code has expired. Please request a new code.',
+                    'code_expired' => true
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Check if max attempts reached
+            if ($employee->verification_attempts >= 5) {
+                // Delete the employee record after 5 failed attempts
+                $employee->delete();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Maximum verification attempts reached. Registration has been cancelled. Please register again.',
+                    'max_attempts_reached' => true
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Verify code
+            if ($employee->email_verification_code !== $request->verification_code) {
+                $employee->increment('verification_attempts');
+                $remainingAttempts = 5 - $employee->verification_attempts;
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid verification code. ' . ($remainingAttempts > 0 ? "You have {$remainingAttempts} attempt(s) remaining." : 'Maximum attempts reached.'),
+                    'remaining_attempts' => $remainingAttempts,
+                    'max_attempts_reached' => $remainingAttempts === 0
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Code is correct - verify email and complete registration
+            $employee->update([
+                'email_verified_at' => Carbon::now(),
+                'status' => 'active',
+                'email_verification_code' => null,
+                'verification_code_expires_at' => null
+            ]);
+
+            // Generate QR code with employee data
+            $qrData = [
+                'type' => 'employee',
+                'id' => $employee->id,
+                'emp_id' => $employee->emp_id,
+                'name' => $employee->first_name . ' ' . $employee->last_name,
+                'email' => $employee->email,
+                'department' => $employee->department,
+                'contact_number' => $employee->contact_number
+            ];
+
+            // Create QR code as SVG
+            $qrCodeSvg = QrCode::format('svg')
+                ->size(200)
+                ->margin(2)
+                ->generate(json_encode($qrData));
+
+            // Save the SVG QR code
+            $qrFileName = 'Employee_' . $employee->emp_id . '_' . $employee->first_name . '_' . $employee->last_name . '.svg';
+            $qrPath = 'qr_codes/employees/' . $qrFileName;
+
+            // Ensure qr_codes/employees directory exists
+            if (!file_exists(public_path('qr_codes/employees'))) {
+                mkdir(public_path('qr_codes/employees'), 0755, true);
+            }
+
+            // Save the SVG QR code
+            file_put_contents(public_path($qrPath), $qrCodeSvg);
+
+            // Update employee record with QR code information
+            $employee->update([
+                'qr_code_path' => $qrPath,
+                'qr_code' => json_encode($qrData)
+            ]);
+
+            // Generate QR download URL
+            $qrDownloadUrl = url("api/download-qr/employees/{$qrFileName}");
+
+            // Send registration email with QR code and credentials
+            try {
+                Mail::to($employee->email)->send(new EmployeeRegistrationMail($employee, $qrDownloadUrl));
+                \Log::info('Registration email sent successfully after verification', [
+                    'employee_id' => $employee->id,
+                    'email' => $employee->email
+                ]);
+            } catch (\Exception $e) {
+                \Log::error('Failed to send registration email after verification', [
+                    'employee_id' => $employee->id,
+                    'email' => $employee->email,
+                    'error' => $e->getMessage()
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Email verified successfully! Your registration is complete. QR code and credentials have been sent to your email.',
+                'employee' => [
+                    'id' => $employee->id,
+                    'emp_id' => $employee->emp_id,
+                    'name' => $employee->first_name . ' ' . $employee->last_name,
+                    'email' => $employee->email,
+                    'position' => $employee->position,
+                    'department' => $employee->department,
+                    'contact' => $employee->contact_number,
+                    'qr_code_path' => $employee->qr_code_path,
+                    'qr_code_data' => $qrData
+                ],
+                'qr_url' => url("api/qr-display/employees/{$qrFileName}"),
+                'qr_download_url' => $qrDownloadUrl
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                 ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                 ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422)->header('Access-Control-Allow-Origin', '*')
+                 ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                 ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        } catch (\Exception $e) {
+            \Log::error('Email verification error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Verification failed due to a system error. Please try again.',
+                'error' => $e->getMessage()
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                 ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                 ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        }
+    }
+
+    /**
+     * Resend verification code
+     */
+    public function resendVerificationCode(Request $request)
+    {
+        try {
+            $request->validate([
+                'employee_id' => 'required|integer'
+            ]);
+
+            $employee = Employee::find($request->employee_id);
+
+            if (!$employee) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Employee not found.'
+                ], 404)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Check if already verified
+            if ($employee->email_verified_at) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email already verified.',
+                    'already_verified' => true
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            // Generate new verification code
+            $verificationCode = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+            // Update employee with new code
+            $employee->update([
+                'email_verification_code' => $verificationCode,
+                'verification_code_expires_at' => Carbon::now()->addMinutes(15),
+                'verification_attempts' => 0  // Reset attempts
+            ]);
+
+            // Send verification email
+            try {
+                Mail::to($employee->email)->send(new EmployeeVerificationMail($employee, $verificationCode));
+                \Log::info('Verification code resent successfully', [
+                    'employee_id' => $employee->id,
+                    'email' => $employee->email
+                ]);
+            } catch (\Exception $e) {
+                \Log::error('Failed to resend verification email', [
+                    'employee_id' => $employee->id,
+                    'email' => $employee->email,
+                    'error' => $e->getMessage()
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to resend verification code. Please try again.',
+                    'error' => 'Email service unavailable'
+                ], 500)->header('Access-Control-Allow-Origin', '*')
+                     ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                     ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Verification code has been resent to your email.'
+            ], 200)->header('Access-Control-Allow-Origin', '*')
+                 ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                 ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422)->header('Access-Control-Allow-Origin', '*')
+                 ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                 ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        } catch (\Exception $e) {
+            \Log::error('Resend verification code error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to resend verification code. Please try again.',
+                'error' => $e->getMessage()
+            ], 500)->header('Access-Control-Allow-Origin', '*')
+                 ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                 ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
         }
     }
 

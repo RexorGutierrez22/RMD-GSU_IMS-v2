@@ -13,10 +13,13 @@ return new class extends Migration
      */
     public function up()
     {
-        Schema::create('borrow_records', function (Blueprint $table) {
-            $table->id();
-            $table->timestamps();
-        });
+        // Check if table already exists (created by earlier migration)
+        if (!Schema::hasTable('borrow_records')) {
+            Schema::create('borrow_records', function (Blueprint $table) {
+                $table->id();
+                $table->timestamps();
+            });
+        }
     }
 
     /**

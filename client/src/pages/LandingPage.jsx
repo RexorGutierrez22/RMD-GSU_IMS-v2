@@ -16,10 +16,39 @@ const LandingPage = () => {
   const [showCursor1, setShowCursor1] = useState(true);
   const [showCursor2, setShowCursor2] = useState(false);
 
-  // Background images for slideshow
+  // Background images for slideshow with individual settings
   const backgrounds = [
-    '/eagle.jpg',
-    '/RMD-Homepage-v3.jpg'
+    {
+      url: '/eagle.jpg',
+      position: 'center',
+      size: 'cover'
+    },
+    {
+      url: '/RMD-Homepage-v3.jpg',
+      position: 'center',
+      size: 'cover' // 1874x600 - very wide, short image
+    },
+    {
+      url: '/RMD-Homepage-v5.jpg',
+      position: 'center center',
+      size: 'cover', // 5712x3213 - much taller than v3, will crop sides to fit viewport
+      // Since v4 is portrait-oriented (taller), 'cover' will show center portion
+      // If you want to see top/bottom, use position: 'top center' or 'bottom center'
+    },
+    {
+      url: '/RMD-Homepage-v6.jpg',
+      position: 'center center',
+      size: 'cover', // 5712x3213 - much taller than v3, will crop sides to fit viewport
+      // Since v4 is portrait-oriented (taller), 'cover' will show center portion
+      // If you want to see top/bottom, use position: 'top center' or 'bottom center'
+    },
+    {
+      url: '/RMD-Homepage-v7.jpg',
+      position: 'center center',
+      size: 'cover', // 5712x3213 - much taller than v3, will crop sides to fit viewport
+      // Since v4 is portrait-oriented (taller), 'cover' will show center portion
+      // If you want to see top/bottom, use position: 'top center' or 'bottom center'
+    }
   ];
 
   // Inspiring quotes for the slideshow
@@ -31,46 +60,180 @@ const LandingPage = () => {
     "Shared tools. Shared trust. Shared success."
   ];
 
-  // Typing effect for "Good Day" and "USePians!" on two lines
+  // Continuous typing effect for "Good Day" and "USePians!" on two lines
+  // Sequential: Type line1 completely → Then type line2 → Wait → Backspace line2 → Then backspace line1 → Repeat
   useEffect(() => {
     const line1Text = "Good Day";
     const line2Text = "USePians!";
-    let line1Index = 0;
-    let line2Index = 0;
-    let typingInterval2;
 
-    // Add initial delay before starting to type
-    const startDelay = setTimeout(() => {
-      // Type first line
-      const typingInterval1 = setInterval(() => {
+    let typingInterval1 = null;
+    let typingInterval2 = null;
+    let backspaceInterval1 = null;
+    let backspaceInterval2 = null;
+    let waitTimeout = null;
+    let backspaceWaitTimeout = null;
+    let line2StartTimeout = null;
+    let line1BackspaceTimeout = null;
+    let initialDelay = null;
+
+    let isTyping = false;
+    let isBackspacing = false;
+    let isActive = true;
+
+    const clearAll = () => {
+      if (typingInterval1) { clearInterval(typingInterval1); typingInterval1 = null; }
+      if (typingInterval2) { clearInterval(typingInterval2); typingInterval2 = null; }
+      if (backspaceInterval1) { clearInterval(backspaceInterval1); backspaceInterval1 = null; }
+      if (backspaceInterval2) { clearInterval(backspaceInterval2); backspaceInterval2 = null; }
+      if (waitTimeout) { clearTimeout(waitTimeout); waitTimeout = null; }
+      if (backspaceWaitTimeout) { clearTimeout(backspaceWaitTimeout); backspaceWaitTimeout = null; }
+      if (line2StartTimeout) { clearTimeout(line2StartTimeout); line2StartTimeout = null; }
+      if (line1BackspaceTimeout) { clearTimeout(line1BackspaceTimeout); line1BackspaceTimeout = null; }
+    };
+
+    const startTypingAnimation = () => {
+      if (!isActive || isTyping || isBackspacing) return;
+
+      clearAll();
+      isTyping = true;
+      isBackspacing = false;
+
+      let line1Index = 0;
+      let line2Index = 0;
+
+      // Reset states
+      setTypedLine1('');
+      setTypedLine2('');
+      setShowCursor1(true);
+      setShowCursor2(false);
+
+      // STEP 1: Type first line "Good Day" completely
+      typingInterval1 = setInterval(() => {
+        if (!isActive) {
+          clearAll();
+          return;
+        }
+
         if (line1Index < line1Text.length) {
           line1Index++;
           setTypedLine1(line1Text.slice(0, line1Index));
         } else {
+          // First line complete - stop cursor, clear interval
           clearInterval(typingInterval1);
+          typingInterval1 = null;
           setShowCursor1(false);
 
-          // Small pause before starting second line
-          setTimeout(() => {
+          // Small pause (200ms) before starting second line
+          line2StartTimeout = setTimeout(() => {
+            if (!isActive) return;
+
+            // STEP 2: Now start typing second line "USePians!"
             setShowCursor2(true);
 
-            // Start typing second line after first line completes
             typingInterval2 = setInterval(() => {
+              if (!isActive) {
+                clearAll();
+                return;
+              }
+
               if (line2Index < line2Text.length) {
                 line2Index++;
                 setTypedLine2(line2Text.slice(0, line2Index));
               } else {
+                // Both lines complete
                 clearInterval(typingInterval2);
+                typingInterval2 = null;
+                setShowCursor2(false);
+                isTyping = false;
+
+                // Wait 10 seconds after both lines are typed
+                waitTimeout = setTimeout(() => {
+                  if (isActive) {
+                    startBackspaceAnimation();
+                  }
+                }, 10000);
               }
             }, 100);
           }, 200);
         }
       }, 100);
-    }, 1200); // Wait 1.2 seconds before starting typing
+    };
+
+    const startBackspaceAnimation = () => {
+      if (!isActive || isTyping || isBackspacing) return;
+
+      clearAll();
+      isBackspacing = true;
+      isTyping = false;
+
+      let line2Index = line2Text.length; // Start from end of "USePians!"
+      let line1Index = line1Text.length;  // Will start after line2 is done
+
+      // STEP 1: Backspace second line "USePians!" first
+      setShowCursor2(true);
+
+      backspaceInterval2 = setInterval(() => {
+        if (!isActive) {
+          clearAll();
+          return;
+        }
+
+        if (line2Index > 0) {
+          line2Index--;
+          setTypedLine2(line2Text.slice(0, line2Index));
+        } else {
+          // Second line completely backspaced
+          clearInterval(backspaceInterval2);
+          backspaceInterval2 = null;
+          setShowCursor2(false);
+
+          // Small pause (200ms) before backspacing first line
+          line1BackspaceTimeout = setTimeout(() => {
+            if (!isActive) return;
+
+            // STEP 2: Now backspace first line "Good Day"
+            setShowCursor1(true);
+
+            backspaceInterval1 = setInterval(() => {
+              if (!isActive) {
+                clearAll();
+                return;
+              }
+
+              if (line1Index > 0) {
+                line1Index--;
+                setTypedLine1(line1Text.slice(0, line1Index));
+              } else {
+                // Both lines completely backspaced
+                clearInterval(backspaceInterval1);
+                backspaceInterval1 = null;
+                setShowCursor1(false);
+                isBackspacing = false;
+
+                // Wait 1.5 seconds before starting typing again
+                backspaceWaitTimeout = setTimeout(() => {
+                  if (isActive) {
+                    startTypingAnimation();
+                  }
+                }, 1500);
+              }
+            }, 80); // Slightly faster backspace
+          }, 200);
+        }
+      }, 80); // Slightly faster backspace
+    };
+
+    // Initial delay before starting first typing animation
+    initialDelay = setTimeout(() => {
+      if (isActive) {
+        startTypingAnimation();
+      }
+    }, 1200);
 
     return () => {
-      clearTimeout(startDelay);
-      if (typingInterval2) clearInterval(typingInterval2);
+      isActive = false;
+      if (initialDelay) clearTimeout(initialDelay);
+      clearAll();
     };
   }, []);
 
@@ -90,7 +253,7 @@ const LandingPage = () => {
     }, 7000);
 
     return () => clearInterval(interval);
-  }, [backgrounds.length]);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-hidden">
@@ -98,30 +261,36 @@ const LandingPage = () => {
       <div className="absolute inset-0 z-0">
         {backgrounds.map((bg, index) => (
           <motion.div
-            key={bg}
+            key={bg.url}
             className="absolute inset-0"
             initial={{ opacity: 0 }}
             animate={{
               opacity: index === currentBgIndex ? 1 : 0,
-              scale: index === currentBgIndex ? 1 : 1.1
+              scale: index === currentBgIndex ? 1 : 1.05 // Reduced from 1.1 to minimize visual issues
             }}
             transition={{
               opacity: { duration: 1.5, ease: "easeInOut" },
               scale: { duration: 1.5, ease: "easeOut" }
             }}
             style={{
-              backgroundImage: `url("${bg}")`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
+              backgroundImage: `url("${bg.url}")`,
+              backgroundSize: bg.size || 'cover',
+              backgroundPosition: bg.position || 'center',
               backgroundRepeat: 'no-repeat',
+              ...(bg.backgroundColor && { backgroundColor: bg.backgroundColor }), // Only add backgroundColor if specified
             }}
           />
         ))}
       </div>
 
       {/* Elegant Gradient Overlay - Modern 2025 Style */}
+      {/* Reduce overlay opacity for v4 image (index 2) to show the group photo better */}
       <motion.div
-        className="absolute inset-0 bg-gradient-to-br from-gray-900/90 via-gray-900/70 to-gray-800/60 z-[1]"
+        className={`absolute inset-0 bg-gradient-to-br z-[1] ${
+          currentBgIndex === 2
+            ? 'from-gray-900/50 via-gray-900/40 to-gray-800/30' // Lighter overlay for v4
+            : 'from-gray-900/90 via-gray-900/70 to-gray-800/60'  // Original dark overlay for others
+        }`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 1.5 }}
@@ -164,75 +333,79 @@ const LandingPage = () => {
       />
 
       {/* Modern Content Section with Premium Layout */}
-      <main className="flex-1 z-10 flex items-center justify-center px-6 md:px-12 lg:px-20 py-12">
+      <main className="flex-1 z-10 flex flex-col items-center justify-center px-6 md:px-12 lg:px-20 py-12">
+        {/* Pure Quote Text - No Background Card - Positioned at Top */}
         <motion.div
-          className="max-w-4xl w-full"
-          initial={{ opacity: 0, y: 40 }}
+          className="mb-8 -mt-32 md:-mt-48 w-full max-w-4xl"
+          initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
+          transition={{ duration: 0.8, delay: 0.5, ease: "easeOut" }}
         >
-          {/* Premium Glassmorphism Card - Center Aligned with More Transparency */}
-          <motion.div
-            className="mb-16 backdrop-blur-sm bg-white/[0.02] rounded-[2.5rem] p-10 border border-white/[0.06] shadow-[0_20px_60px_rgba(0,0,0,0.25)]"
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.9, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          >
             {/* Quote Slideshow */}
-            <div className="relative min-h-[160px] mb-8">
+            <div className="relative min-h-[140px] mb-6">
               {quotes.map((quote, index) => (
                 <motion.div
                   key={index}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, scale: 0.95 }}
                   animate={
                     index === currentQuoteIndex
-                      ? { opacity: 1, y: 0 }
-                      : { opacity: 0, y: -20 }
+                      ? { opacity: 1, scale: 1 }
+                      : { opacity: 0, scale: 0.95 }
                   }
-                  transition={{ duration: 0.7, ease: "easeOut" }}
+                  transition={{ duration: 0.6, ease: "easeInOut" }}
                   className="absolute inset-0 flex items-center justify-center"
                 >
-                  <div className="relative w-full text-center">
-                    <motion.div
-                      className="absolute -top-6 left-1/2 -translate-x-1/2 text-7xl text-red-400/15 font-serif leading-none select-none"
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{
-                        opacity: index === currentQuoteIndex ? 0.15 : 0,
-                        scale: index === currentQuoteIndex ? 1 : 0.8
-                      }}
-                      transition={{ delay: 0.2, duration: 0.5 }}
-                    >
-                      "
-                    </motion.div>
-
-                    <p className="text-2xl sm:text-3xl lg:text-4xl font-light leading-relaxed tracking-wide px-6 text-white/90">
-                      {quote}
-                    </p>
-                  </div>
+                  <p className="text-2xl sm:text-3xl lg:text-4xl font-light italic leading-relaxed tracking-wide px-4 md:px-6 text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)] text-center">
+                    {quote}
+                  </p>
                 </motion.div>
               ))}
             </div>
 
-            {/* Sleek Progress Dots - Centered */}
-            <div className="flex gap-3 justify-center mt-12">
+            {/* Elegant Progress Line with Dots */}
+            <div className="flex items-center justify-center gap-2 mt-8">
               {quotes.map((_, index) => (
                 <motion.button
                   key={index}
                   onClick={() => setCurrentQuoteIndex(index)}
-                  whileHover={{ scale: 1.3 }}
+                  whileHover={{ scale: 1.2 }}
                   whileTap={{ scale: 0.9 }}
-                  className={`transition-all duration-500 rounded-full ${
-                    index === currentQuoteIndex
-                      ? 'w-10 h-2 bg-gradient-to-r from-red-500 to-red-600 shadow-lg shadow-red-500/30'
-                      : 'w-2 h-2 bg-white/25 hover:bg-white/40'
-                  }`}
+                  className="relative group"
                   aria-label={`Go to quote ${index + 1}`}
-                />
+                >
+                  {/* Connecting Line */}
+                  {index < quotes.length - 1 && (
+                    <div className={`absolute left-full top-1/2 -translate-y-1/2 h-[1px] w-6 ${
+                      index < currentQuoteIndex
+                        ? 'bg-red-500'
+                        : 'bg-white/20'
+                    } transition-colors duration-500`} />
+                  )}
+
+                  {/* Dot */}
+                  <motion.div
+                    className={`w-2 h-2 rounded-full transition-all duration-500 ${
+                      index === currentQuoteIndex
+                        ? 'bg-red-500 shadow-lg shadow-red-500/50'
+                        : 'bg-white/40 group-hover:bg-white/60'
+                    }`}
+                    animate={{
+                      scale: index === currentQuoteIndex ? 1.5 : 1,
+                    }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </motion.button>
               ))}
             </div>
-          </motion.div>
+        </motion.div>
 
-          {/* Hero Section - Center Aligned */}
+        <motion.div
+          className="max-w-4xl w-full mt-16 md:mt-24"
+          initial={{ opacity: 0, y: 40 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1, ease: "easeOut", delay: 0.3 }}
+        >
+          {/* Hero Section - Center Aligned - Moved Downward */}
           <motion.div
             className="text-center mb-14"
             initial={{ opacity: 0, y: 30 }}
@@ -377,6 +550,63 @@ const LandingPage = () => {
           </motion.div>
         </motion.div>
       </main>
+
+      {/* Footer - Transparent, Floating on Sliding Images */}
+      <footer className="relative z-10 w-full pb-2 -mt-32" style={{ backgroundColor: 'transparent' }}>
+        <div className="max-w-7xl mx-auto px-6" style={{ backgroundColor: 'transparent' }}>
+          {/* Horizontal Line Separator */}
+          <div className="w-full h-px bg-gray-300/40 mb-3"></div>
+
+          {/* Footer Content - Centered */}
+          <div className="flex flex-col items-center" style={{ backgroundColor: 'transparent' }}>
+            {/* Two Circular Logos Side by Side with Decorative Lines */}
+            <div className="flex items-center justify-center gap-4 mb-2">
+              {/* Decorative Line Before */}
+              <div className="h-[0.8px] w-48 bg-gray-300/60"></div>
+
+              {/* Logos Container */}
+              <div className="flex items-center justify-center gap-3">
+                {/* USeP Logo */}
+                <div className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center" style={{ backgroundColor: 'transparent' }}>
+                  <img
+                    src="/Usep_logo.png"
+                    alt="University of Southeastern Philippines"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+
+                {/* RMD Logo */}
+                <div className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center" style={{ backgroundColor: 'transparent' }}>
+                  <img
+                    src="/RMD.png"
+                    alt="Resource Data Management"
+                    className="w-full h-full object-cover rounded-full"
+                  />
+                </div>
+              </div>
+
+              {/* Decorative Line After */}
+              <div className="h-[0.8px] w-48 bg-gray-300/60"></div>
+            </div>
+
+            {/* First Line: Organization Text - Single Line */}
+            <p className="text-white/90 text-sm font-medium text-center whitespace-nowrap mb-0.5" style={{ backgroundColor: 'transparent' }}>
+              University of Southeastern Philippines | Resource Management Division
+            </p>
+
+            {/* Second Line: Developer Team Link */}
+            <motion.button
+              onClick={() => navigate('/our-team')}
+              className="text-white hover:text-white/90 text-sm font-semibold transition-colors duration-300 underline underline-offset-2 decoration-white/80 hover:decoration-white"
+              style={{ backgroundColor: 'transparent' }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              Developer Team
+            </motion.button>
+          </div>
+        </div>
+      </footer>
 
       {/* Borrow Request Modal */}
       {showBorrowRequest && (

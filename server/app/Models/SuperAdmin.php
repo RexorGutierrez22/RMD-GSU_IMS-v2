@@ -28,6 +28,9 @@ class SuperAdmin extends Authenticatable
         'password',
         'full_name',
         'email',
+        'department',
+        'contact_number',
+        'position',
     ];
 
     /**

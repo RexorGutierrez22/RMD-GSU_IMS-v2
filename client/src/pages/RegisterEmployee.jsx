@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Alert from '../components/Alert.jsx';
 import QRCodeModal from '../components/QRCodeModal.jsx';
+import EmailVerificationModal from '../components/EmailVerificationModal.jsx';
 import Header from '../components/Header.jsx';
 
 const RegisterEmployee = () => {
@@ -27,7 +28,9 @@ const RegisterEmployee = () => {
 	const [fieldErrors, setFieldErrors] = useState({});
 	const [isCheckingUniqueness, setIsCheckingUniqueness] = useState(false);
 	const [showQRModal, setShowQRModal] = useState(false);
+	const [showVerificationModal, setShowVerificationModal] = useState(false);
 	const [registeredData, setRegisteredData] = useState(null);
+	const [pendingVerification, setPendingVerification] = useState(null);
 
 	const onChange = (e) => {
 		const { name, value } = e.target;
@@ -266,24 +269,29 @@ const RegisterEmployee = () => {
 
 			const { data } = await axios.post('http://localhost:8000/api/employees', formData);
 
-			// Store registration data and show success
-			setRegisteredData({
-				...form,
-				id: data.employee?.id || 'N/A',
-				qrCode: data.qr_url || data.qr_code || null,
-				qrDownloadUrl: data.qr_download_url || null
-			});
+			console.log('🔍 Registration response:', data);
 
-			setMsg('🎉 Registration Successful!');
-			setAlertType('success');
-			setShowQRModal(true);
-
-			// Reset form
-			setForm({
-				firstName: '', lastName: '', middleName: '', email: '',
-				empId: '', position: '', department: '', contact: ''
-			});
-			setFieldErrors({});
+			// Check if verification is required
+			if (data.requires_verification) {
+				setPendingVerification({
+					userId: data.employee_id,
+					email: data.email
+				});
+				setShowVerificationModal(true);
+				setMsg('📧 Verification code sent to your email!');
+				setAlertType('success');
+			} else {
+				// Legacy flow (shouldn't happen with new flow)
+				setRegisteredData({
+					...form,
+					id: data.employee?.id || 'N/A',
+					qrCode: data.qr_url || data.qr_code || null,
+					qrDownloadUrl: data.qr_download_url || null
+				});
+				setMsg('🎉 Registration Successful!');
+				setAlertType('success');
+				setShowQRModal(true);
+			}
 		} catch (err) {
 			console.error('Registration error:', err);
 			setAlertType('error');
@@ -698,14 +706,49 @@ const RegisterEmployee = () => {
 				onClose={() => setMsg('')}
 			/>
 
-			{/* QR Code Modal */}
+			{/* Email Verification Modal */}
+			{showVerificationModal && pendingVerification && (
+				<EmailVerificationModal
+					isOpen={showVerificationModal}
+					onClose={() => {
+						setShowVerificationModal(false);
+						setPendingVerification(null);
+					}}
+					onVerificationSuccess={(responseData) => {
+						// Verification successful - show QR modal
+						setRegisteredData({
+							...form,
+							id: responseData.employee?.id || 'N/A',
+							qrCode: responseData.qr_url || null,
+							qrDownloadUrl: responseData.qr_download_url || null
+						});
+						setShowVerificationModal(false);
+						setShowQRModal(true);
+						setPendingVerification(null);
+						setMsg('🎉 Email verified! Registration complete!');
+						setAlertType('success');
+
+						// Reset form after successful verification
+						setForm({
+							firstName: '', lastName: '', middleName: '', email: '',
+							empId: '', position: '', department: '', contact: ''
+						});
+						setFieldErrors({});
+					}}
+					userId={pendingVerification.userId}
+					email={pendingVerification.email}
+					userType="employee"
+				/>
+			)}
+
+			{/* QR Code Modal - shown after successful verification */}
 			{showQRModal && registeredData && (
 				<QRCodeModal
 					isOpen={showQRModal}
 					onClose={() => setShowQRModal(false)}
 					qrUrl={registeredData.qrCode || null}
 					qrDownloadUrl={registeredData.qrDownloadUrl || null}
-					studentData={registeredData}
+					employeeData={registeredData}
 				/>
 			)}
 		</div>

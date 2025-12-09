@@ -11,6 +11,8 @@ const BorrowRequestQR = ({ onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false); // Separate state for submit button
   const [submittedRequest, setSubmittedRequest] = useState(null); // Store submitted request data
+  const [requestStatus, setRequestStatus] = useState('pending'); // Track request status: pending, approved, rejected
+  const [statusCheckInterval, setStatusCheckInterval] = useState(null); // Store interval ID for status polling
   const [borrowDetails, setBorrowDetails] = useState({
     borrowDate: new Date().toISOString().split('T')[0],
     returnDate: '',
@@ -36,33 +38,33 @@ const BorrowRequestQR = ({ onClose }) => {
 
   // Fallback data for development - matches API format
   const mockUsers = {
-    'STU-2024-001': { 
-      id: 1, 
-      qrCode: 'STU-2024-001', 
-      first_name: 'John', 
-      last_name: 'Doe', 
+    'STU-2024-001': {
+      id: 1,
+      qrCode: 'STU-2024-001',
+      first_name: 'John',
+      last_name: 'Doe',
       firstName: 'John',
       lastName: 'Doe',
-      email: 'john.doe@usep.edu.ph', 
-      type: 'Student', 
+      email: 'john.doe@usep.edu.ph',
+      type: 'Student',
       studentId: '2024-00001',
       student_id: '2024-00001',
-      course: 'Computer Science', 
+      course: 'Computer Science',
       contactNumber: '+63 912 345 6789',
       contact_number: '+63 912 345 6789'
     },
-    'EMP-2024-001': { 
-      id: 2, 
-      qrCode: 'EMP-2024-001', 
-      first_name: 'Jane', 
+    'EMP-2024-001': {
+      id: 2,
+      qrCode: 'EMP-2024-001',
+      first_name: 'Jane',
       last_name: 'Smith',
       firstName: 'Jane',
-      lastName: 'Smith', 
-      email: 'jane.smith@usep.edu.ph', 
-      type: 'Employee', 
+      lastName: 'Smith',
+      email: 'jane.smith@usep.edu.ph',
+      type: 'Employee',
       employeeId: 'EMP-2024-001',
       employee_id: 'EMP-2024-001',
-      position: 'IT Specialist', 
+      position: 'IT Specialist',
       contactNumber: '+63 918 765 4321',
       contact_number: '+63 918 765 4321'
     }
@@ -84,32 +86,85 @@ const BorrowRequestQR = ({ onClose }) => {
     }, duration);
   };
 
+  // Poll for transaction status updates
+  const startStatusPolling = (transactionId) => {
+    // Clear any existing interval
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+    }
+
+    // Poll every 3 seconds for status updates
+    const interval = setInterval(async () => {
+      try {
+        const response = await transactionApiIMS.getTransaction(transactionId);
+
+        if (response.success && response.data) {
+          const newStatus = response.data.status;
+
+          // Use functional update to get current status
+          setRequestStatus(currentStatus => {
+            // Update status if it changed from pending
+            if (newStatus !== currentStatus && (newStatus === 'borrowed' || newStatus === 'rejected' || newStatus === 'pending')) {
+              // Update submitted request with new status
+              setSubmittedRequest(prev => ({
+                ...prev,
+                status: newStatus,
+                approved_at: response.data.approved_at,
+                rejected_at: response.data.rejected_at,
+                approved_by: response.data.approved_by,
+                transaction_id: response.data.transaction_id || prev.transaction_id
+              }));
+
+              // Stop polling once status is approved (borrowed) or rejected
+              if (newStatus === 'borrowed' || newStatus === 'rejected') {
+                clearInterval(interval);
+                setStatusCheckInterval(null);
+              }
+
+              return newStatus;
+            }
+
+            return currentStatus; // No change
+          });
+        }
+      } catch (error) {
+        // Silent error handling - polling will retry on next interval
+      }
+    }, 3000); // Check every 3 seconds
+
+    setStatusCheckInterval(interval);
+  };
+
+  // Cleanup interval on component unmount
+  useEffect(() => {
+    return () => {
+      if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+      }
+    };
+  }, [statusCheckInterval]);
+
   // Load available items on component mount
   useEffect(() => {
     const loadInventory = async () => {
       try {
         setIsLoading(true);
-        console.log('🔄 Fetching inventory from API...');
         const response = await inventoryApiIMS.getItems();
-        console.log('📦 API Response:', response);
-        
+
         if (response.success) {
-          console.log('✅ Inventory data received:', response.data);
-          
+
           // Handle pagination - extract items array
           let items = response.data;
           if (response.data.data) {
             items = response.data.data; // Paginated response
           }
-          
+
           // Ensure items is an array
           if (!Array.isArray(items)) {
-            console.error('❌ Items is not an array:', items);
+            console.error('Items is not an array:', items);
             items = [];
           }
-          
-          console.log('📊 Processing items:', items.length, 'total items');
-          
+
           const availableItemsOnly = items.filter(item => {
             // Use available_quantity or quantity from backend
             const availableQty = item.available_quantity || item.quantity || 0;
@@ -117,23 +172,16 @@ const BorrowRequestQR = ({ onClose }) => {
             const notMaintenance = item.status !== 'Maintenance';
             const notLost = item.status !== 'Lost';
             const notOutOfStock = item.status !== 'Out of Stock';
-            
-            console.log(`Item: ${item.name || item.itemName}, Available: ${availableQty}, Status: ${item.status}`);
-            
+
             return isAvailable && notMaintenance && notLost && notOutOfStock;
           });
-          
-          console.log('✅ Available items after filtering:', availableItemsOnly.length);
-          console.log('📋 Sample items:', availableItemsOnly.slice(0, 3));
+
           setAvailableItems(availableItemsOnly);
         } else {
-          console.warn('⚠️ API returned success: false');
           setAvailableItems([]);
         }
       } catch (error) {
-        console.error('❌ Error loading inventory:', error);
-        console.error('Error details:', error.response || error.message);
-        // Try to show some error feedback to user
+        console.error('Error loading inventory:', error);
         showNotification('error', 'Loading Error', 'Failed to load inventory items. Please refresh and try again.');
         setAvailableItems([]);
       } finally {
@@ -146,7 +194,7 @@ const BorrowRequestQR = ({ onClose }) => {
   // Handle click outside to close suggestions
   useEffect(() => {
     const handleClickOutside = (event) => {
-      const isOutside = suggestionsRef.current.every(ref => 
+      const isOutside = suggestionsRef.current.every(ref =>
         ref && !ref.contains(event.target)
       );
       if (isOutside) {
@@ -162,7 +210,7 @@ const BorrowRequestQR = ({ onClose }) => {
   useEffect(() => {
     if (currentStep === 'scanner' && scannerRef.current) {
       console.log('🎥 Initializing QR Scanner...');
-      
+
       const initScanner = async () => {
         try {
           // Clear any existing scanner first
@@ -193,27 +241,27 @@ const BorrowRequestQR = ({ onClose }) => {
             try {
               // Test camera access
               console.log('📷 Testing camera access...');
-              const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { 
+              const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
                   facingMode: "environment",
                   width: { ideal: 1280 },
                   height: { ideal: 720 }
-                } 
+                }
               });
               console.log('✅ Camera access granted!');
-              
+
               // Stop test stream
               stream.getTracks().forEach(track => track.stop());
-              
+
               // Wait a bit before initializing scanner
               await new Promise(resolve => setTimeout(resolve, 300));
-              
+
               console.log('🔄 Initializing Html5QrcodeScanner...');
-              
+
               // Initialize new scanner
               html5QrcodeScanner.current = new Html5QrcodeScanner(
                 "qr-reader",
-                { 
+                {
                   fps: 10,
                   qrbox: { width: 250, height: 250 },
                   aspectRatio: 1.0,
@@ -226,7 +274,7 @@ const BorrowRequestQR = ({ onClose }) => {
               );
 
               console.log('📹 Rendering scanner...');
-              
+
               html5QrcodeScanner.current.render(
                 (decodedText) => {
                   console.log('✅ QR Code detected:', decodedText);
@@ -234,15 +282,15 @@ const BorrowRequestQR = ({ onClose }) => {
                 },
                 (errorMessage) => {
                   // Only log actual errors, not scanning status
-                  if (!errorMessage.includes('NotFoundException') && 
+                  if (!errorMessage.includes('NotFoundException') &&
                       !errorMessage.includes('No MultiFormat Readers')) {
                     console.log('Scanner error:', errorMessage);
                   }
                 }
               );
-              
+
               console.log('✅ Scanner rendered successfully!');
-              
+
             } catch (cameraError) {
               console.error('❌ Camera permission error:', cameraError);
               if (cameraError.name === 'NotAllowedError') {
@@ -262,10 +310,10 @@ const BorrowRequestQR = ({ onClose }) => {
           showNotification('error', 'Scanner Error', 'Failed to initialize QR scanner: ' + error.message);
         }
       };
-      
+
       // Delay to ensure DOM is ready and CSP is applied
       const timer = setTimeout(initScanner, 500);
-      
+
       return () => {
         clearTimeout(timer);
       };
@@ -275,8 +323,8 @@ const BorrowRequestQR = ({ onClose }) => {
     return () => {
       if (html5QrcodeScanner.current) {
         console.log('🧹 Cleaning up scanner...');
-        html5QrcodeScanner.current.clear().catch(e => {
-          console.log('Cleanup error (ignorable):', e);
+        html5QrcodeScanner.current.clear().catch(() => {
+          // Ignore cleanup errors - scanner may already be cleared
         });
         html5QrcodeScanner.current = null;
       }
@@ -285,9 +333,9 @@ const BorrowRequestQR = ({ onClose }) => {
 
   const handleQRScan = async (qrData) => {
     console.log('🔍 QR Scan initiated with data:', qrData);
-    
+
     setIsLoading(true);
-    
+
     // Stop the scanner temporarily to prevent multiple scans
     if (html5QrcodeScanner.current) {
       try {
@@ -296,12 +344,12 @@ const BorrowRequestQR = ({ onClose }) => {
         console.log('Scanner pause error (can be ignored):', err);
       }
     }
-    
+
     try {
       console.log('📡 Making API call to getUserByQrCode...');
       const response = await userApiIMS.getUserByQrCode(qrData);
       console.log('📥 API Response:', response);
-      
+
       if (response.success && response.data && response.data.user) {
         const user = response.data.user;
         console.log('✅ User found from API:', user);
@@ -309,10 +357,12 @@ const BorrowRequestQR = ({ onClose }) => {
         user.originalQrData = qrData;
         setScannedUser(user);
         setBorrowDetails(prev => ({ ...prev, contactNumber: user.contact_number }));
-        
+
         // Clear scanner before moving to next step
         if (html5QrcodeScanner.current) {
-          await html5QrcodeScanner.current.clear().catch(console.error);
+          await html5QrcodeScanner.current.clear().catch(() => {
+            // Ignore cleanup errors - scanner may already be cleared
+          });
         }
         setCurrentStep('form');
       } else if (response.success && response.data) {
@@ -323,10 +373,12 @@ const BorrowRequestQR = ({ onClose }) => {
         user.originalQrData = qrData;
         setScannedUser(user);
         setBorrowDetails(prev => ({ ...prev, contactNumber: user.contact_number }));
-        
+
         // Clear scanner before moving to next step
         if (html5QrcodeScanner.current) {
-          await html5QrcodeScanner.current.clear().catch(console.error);
+          await html5QrcodeScanner.current.clear().catch(() => {
+            // Ignore cleanup errors - scanner may already be cleared
+          });
         }
         setCurrentStep('form');
       } else {
@@ -338,10 +390,12 @@ const BorrowRequestQR = ({ onClose }) => {
           mockUser.originalQrData = qrData;
           setScannedUser(mockUser);
           setBorrowDetails(prev => ({ ...prev, contactNumber: mockUser.contactNumber }));
-          
+
           // Clear scanner before moving to next step
           if (html5QrcodeScanner.current) {
-            await html5QrcodeScanner.current.clear().catch(console.error);
+            await html5QrcodeScanner.current.clear().catch(() => {
+            // Ignore cleanup errors - scanner may already be cleared
+          });
           }
           setCurrentStep('form');
         } else {
@@ -367,10 +421,12 @@ const BorrowRequestQR = ({ onClose }) => {
         mockUser.originalQrData = qrData;
         setScannedUser(mockUser);
         setBorrowDetails(prev => ({ ...prev, contactNumber: mockUser.contactNumber }));
-        
+
         // Clear scanner before moving to next step
         if (html5QrcodeScanner.current) {
-          await html5QrcodeScanner.current.clear().catch(console.error);
+          await html5QrcodeScanner.current.clear().catch(() => {
+            // Ignore cleanup errors - scanner may already be cleared
+          });
         }
         setCurrentStep('form');
       } else {
@@ -406,7 +462,7 @@ const BorrowRequestQR = ({ onClose }) => {
   const handleItemChange = (index, field, value) => {
     const updated = [...selectedItems];
     updated[index][field] = value;
-    
+
     if (field === 'itemId') {
       const item = availableItems.find(i => i.id === parseInt(value));
       if (item) {
@@ -418,11 +474,11 @@ const BorrowRequestQR = ({ onClose }) => {
         updated[index].itemType = item.type || item.quality;
       }
     }
-    
+
     if (field === 'searchQuery') {
       updated[index].showSuggestions = value.length > 0;
     }
-    
+
     setSelectedItems(updated);
   };
 
@@ -447,7 +503,7 @@ const BorrowRequestQR = ({ onClose }) => {
       const brand = (item.brand || '').toLowerCase();
       const specification = (item.specification || '').toLowerCase();
       const location = (item.location || '').toLowerCase();
-      
+
       return itemName.includes(query) ||
              category.includes(query) ||
              brand.includes(query) ||
@@ -487,12 +543,12 @@ const BorrowRequestQR = ({ onClose }) => {
     }
 
     setIsSubmitting(true); // Use separate state for submit button
-    
+
     try {
       // Format data to match backend API expectations
       // IMPORTANT: Store the original QR data from scanning, not processed user data
       let qrCodeData = scannedUser.originalQrData || scannedUser.qr_code || scannedUser.qrCode;
-      
+
       // If we don't have original QR data, reconstruct it from user info
       if (!qrCodeData) {
         if (scannedUser.student_id || scannedUser.studentId) {
@@ -519,7 +575,7 @@ const BorrowRequestQR = ({ onClose }) => {
           });
         }
       }
-      
+
       const transactionData = {
         user_qr_code: qrCodeData,
         borrow_date: borrowDetails.borrowDate,
@@ -537,31 +593,49 @@ const BorrowRequestQR = ({ onClose }) => {
       console.log('📤 QR Code data being sent:', qrCodeData);
 
       const response = await transactionApiIMS.createBorrow(transactionData);
-      
+
       console.log('📥 Borrow response:', response);
-      
+
       if (response.success) {
         const totalQuantity = selectedItems.reduce((sum, item) => sum + parseInt(item.quantity), 0);
-        
+
+        // Extract transaction data - API returns { transactions: [...], user: {...} }
+        const transactions = response.data.transactions || [];
+        const firstTransaction = transactions.length > 0 ? transactions[0] : null;
+        const transactionId = firstTransaction?.id || null;
+        const transactionStatus = firstTransaction?.status || 'pending';
+
         // Store submitted request data for claim slip
-        setSubmittedRequest({
-          ...response.data,
+        const requestData = {
+          id: transactionId,
+          transaction_id: firstTransaction?.transaction_id || 'Pending',
+          transactions: transactions,
           user: scannedUser,
           borrowDetails,
           selectedItems,
           totalQuantity,
-          submittedAt: new Date().toLocaleString()
-        });
-        
+          submittedAt: new Date().toLocaleString(),
+          status: transactionStatus,
+          approved_at: firstTransaction?.approved_at || null,
+          approved_by: firstTransaction?.approved_by || null
+        };
+        setSubmittedRequest(requestData);
+        setRequestStatus(transactionStatus);
+
         showNotification(
           'success',
           'Borrow Request Submitted!',
           `Successfully submitted request for ${selectedItems.length} items (${totalQuantity} total quantity).`,
           4000
         );
-        
+
         // Go to claim slip step
         setCurrentStep('claim-slip');
+
+        // Start polling for status updates if transaction ID exists
+        if (transactionId) {
+          startStatusPolling(transactionId);
+        }
       } else {
         showNotification(
           'error',
@@ -589,11 +663,11 @@ const BorrowRequestQR = ({ onClose }) => {
         @media print {
           body * { visibility: hidden; }
           #claim-slip, #claim-slip * { visibility: visible; }
-          #claim-slip { 
-            position: absolute; 
-            left: 0; 
-            top: 0; 
-            width: 100%; 
+          #claim-slip {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
             background: white !important;
             box-shadow: none !important;
             border: 2px solid black !important;
@@ -649,7 +723,7 @@ const BorrowRequestQR = ({ onClose }) => {
         </div>
 
         {/* Content */}
-        <div className="p-6 max-h-[calc(90vh-180px)] overflow-y-auto">
+        <div className="p-6 max-h-[calc(90vh-180px)] overflow-y-auto scrollbar-hide">
           {/* Step 1: QR Scanner */}
           {currentStep === 'scanner' && (
             <div className="text-center">
@@ -663,7 +737,7 @@ const BorrowRequestQR = ({ onClose }) => {
                 <div className="mt-4 text-sm text-gray-500">
                   {isLoading ? 'Looking up user...' : 'Scanning...'}
                 </div>
-                
+
                 {/* Loading overlay */}
                 {isLoading && (
                   <div className="absolute inset-0 bg-white bg-opacity-80 flex items-center justify-center rounded-2xl">
@@ -673,42 +747,6 @@ const BorrowRequestQR = ({ onClose }) => {
                     </div>
                   </div>
                 )}
-              </div>
-
-              {/* Demo buttons for testing */}
-              <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-                <p className="text-sm text-yellow-800 font-medium mb-3">Demo Mode - Click to simulate QR scan:</p>
-                <div className="flex gap-2 justify-center">
-                  <button
-                    onClick={() => handleQRScan(JSON.stringify({
-                      type: 'student',
-                      id: 1,
-                      student_id: 'STU-2024-001',
-                      name: 'John Doe',
-                      email: 'john.doe@usep.edu.ph',
-                      course: 'Computer Science',
-                      year_level: '3rd Year',
-                      contact_number: '+63 912 345 6789'
-                    }))}
-                    className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition-colors"
-                  >
-                    Scan Student
-                  </button>
-                  <button
-                    onClick={() => handleQRScan(JSON.stringify({
-                      type: 'employee',
-                      id: 2,
-                      emp_id: 'EMP-2024-001',
-                      name: 'Jane Smith',
-                      email: 'jane.smith@usep.edu.ph',
-                      department: 'Information Technology Office',
-                      contact_number: '+63 918 765 4321'
-                    }))}
-                    className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm hover:bg-green-600 transition-colors"
-                  >
-                    Scan Employee
-                  </button>
-                </div>
               </div>
             </div>
           )}
@@ -727,7 +765,7 @@ const BorrowRequestQR = ({ onClose }) => {
                   </div>
                 </div>
               )}
-              
+
               {availableItems.length === 0 && !isLoading && (
                 <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <div className="flex items-center gap-2 text-sm text-yellow-800">
@@ -738,7 +776,7 @@ const BorrowRequestQR = ({ onClose }) => {
                   </div>
                 </div>
               )}
-              
+
               {/* User Information Display */}
               <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-xl p-6 mb-6">
                 <div className="flex items-center mb-4">
@@ -759,7 +797,7 @@ const BorrowRequestQR = ({ onClose }) => {
                     </span>
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <span className="font-medium text-blue-800">Email:</span>
@@ -859,8 +897,8 @@ const BorrowRequestQR = ({ onClose }) => {
                 ) : (
                   <div className="space-y-4">
                     {selectedItems.map((item, index) => (
-                      <div 
-                        key={item.id} 
+                      <div
+                        key={item.id}
                         className="bg-gray-50 rounded-lg p-4 border"
                         ref={el => suggestionsRef.current[index] = el}
                       >
@@ -873,7 +911,7 @@ const BorrowRequestQR = ({ onClose }) => {
                             Remove
                           </button>
                         </div>
-                        
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="relative">
                             <label className="block text-sm font-medium text-gray-700 mb-1">Item</label>
@@ -887,7 +925,7 @@ const BorrowRequestQR = ({ onClose }) => {
                               disabled={isLoading}
                               required
                             />
-                            
+
                             {/* Loading indicator */}
                             {isLoading && (
                               <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4 text-center">
@@ -900,7 +938,7 @@ const BorrowRequestQR = ({ onClose }) => {
                                 </div>
                               </div>
                             )}
-                            
+
                             {/* Auto-suggest dropdown */}
                             {!isLoading && item.showSuggestions && getFilteredItems(item.searchQuery).length > 0 && (
                               <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
@@ -921,7 +959,7 @@ const BorrowRequestQR = ({ onClose }) => {
                                           {(availableItem.type || availableItem.quality) && (
                                             <span className={`text-xs px-2 py-0.5 rounded-full ${
                                               (availableItem.type || availableItem.quality) === 'consumable' || (availableItem.type || availableItem.quality) === 'Consumable'
-                                                ? 'bg-orange-100 text-orange-700' 
+                                                ? 'bg-orange-100 text-orange-700'
                                                 : 'bg-blue-100 text-blue-700'
                                             }`}>
                                               {availableItem.quality || availableItem.type}
@@ -931,9 +969,9 @@ const BorrowRequestQR = ({ onClose }) => {
                                       </div>
                                       <div className="ml-3 text-right">
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                          (availableItem.available_quantity || availableItem.quantity || 0) > 10 
-                                            ? 'bg-green-100 text-green-800' 
-                                            : (availableItem.available_quantity || availableItem.quantity || 0) > 5 
+                                          (availableItem.available_quantity || availableItem.quantity || 0) > 10
+                                            ? 'bg-green-100 text-green-800'
+                                            : (availableItem.available_quantity || availableItem.quantity || 0) > 5
                                             ? 'bg-yellow-100 text-yellow-800'
                                             : 'bg-red-100 text-red-800'
                                         }`}>
@@ -948,7 +986,7 @@ const BorrowRequestQR = ({ onClose }) => {
                                 ))}
                               </div>
                             )}
-                            
+
                             {/* No results message */}
                             {!isLoading && item.showSuggestions && item.searchQuery && getFilteredItems(item.searchQuery).length === 0 && (
                               <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg p-4">
@@ -961,7 +999,7 @@ const BorrowRequestQR = ({ onClose }) => {
                                 </div>
                               </div>
                             )}
-                            
+
                             {/* Show all available items when field is empty and focused */}
                             {!isLoading && item.showSuggestions && !item.searchQuery && availableItems.length > 0 && (
                               <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
@@ -988,9 +1026,9 @@ const BorrowRequestQR = ({ onClose }) => {
                                       </div>
                                       <div className="ml-3 text-right">
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                          (availableItem.available_quantity || availableItem.quantity || 0) > 10 
-                                            ? 'bg-green-100 text-green-800' 
-                                            : (availableItem.available_quantity || availableItem.quantity || 0) > 5 
+                                          (availableItem.available_quantity || availableItem.quantity || 0) > 10
+                                            ? 'bg-green-100 text-green-800'
+                                            : (availableItem.available_quantity || availableItem.quantity || 0) > 5
                                             ? 'bg-yellow-100 text-yellow-800'
                                             : 'bg-red-100 text-red-800'
                                         }`}>
@@ -1009,7 +1047,7 @@ const BorrowRequestQR = ({ onClose }) => {
                                 )}
                               </div>
                             )}
-                            
+
                             {/* Selected item display */}
                             {item.itemId && (
                               <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -1022,8 +1060,8 @@ const BorrowRequestQR = ({ onClose }) => {
                                   </div>
                                   {item.itemType && (
                                     <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                      item.itemType === 'consumable' 
-                                        ? 'bg-orange-100 text-orange-700' 
+                                      item.itemType === 'consumable'
+                                        ? 'bg-orange-100 text-orange-700'
                                         : 'bg-blue-100 text-blue-700'
                                     }`}>
                                       {item.itemType}
@@ -1089,9 +1127,9 @@ const BorrowRequestQR = ({ onClose }) => {
 
           {/* Review Step */}
           {currentStep === 'review' && (
-            <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto">
+            <div className="p-6 max-h-[calc(90vh-120px)] overflow-y-auto scrollbar-hide">
               <h3 className="text-xl font-bold text-gray-900 mb-6">Review Your Borrow Request</h3>
-              
+
               {/* User Information */}
               <div className="bg-gray-50 rounded-lg p-4 mb-6">
                 <h4 className="font-semibold text-gray-900 mb-3">Borrower Information</h4>
@@ -1204,13 +1242,47 @@ const BorrowRequestQR = ({ onClose }) => {
           {currentStep === 'claim-slip' && submittedRequest && (
             <div className="p-6">
               <div className="text-center mb-6">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted Successfully!</h3>
-                <p className="text-gray-600">Present this claim slip to the staff for approval.</p>
+                {requestStatus === 'pending' ? (
+                  <>
+                    <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-8 h-8 text-yellow-600 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted Successfully!</h3>
+                    <p className="text-gray-600">Waiting for admin approval. Please check back later.</p>
+                  </>
+                ) : requestStatus === 'borrowed' || requestStatus === 'approved' ? (
+                  <>
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Request Approved!</h3>
+                    <p className="text-gray-600">Your borrow request has been approved. You can now print the claim slip.</p>
+                  </>
+                ) : requestStatus === 'rejected' ? (
+                  <>
+                    <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-8 h-8 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Request Rejected</h3>
+                    <p className="text-gray-600">Your borrow request has been rejected. Please contact the admin for more information.</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <svg className="w-8 h-8 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">Request Submitted Successfully!</h3>
+                    <p className="text-gray-600">Present this claim slip to the staff for approval.</p>
+                  </>
+                )}
               </div>
 
               {/* Printable Claim Slip */}
@@ -1227,7 +1299,17 @@ const BorrowRequestQR = ({ onClose }) => {
                     <div className="space-y-1 text-sm">
                       <div><span className="font-medium">Request ID:</span> {submittedRequest.id || 'Pending'}</div>
                       <div><span className="font-medium">Date Submitted:</span> {submittedRequest.submittedAt}</div>
-                      <div><span className="font-medium">Status:</span> <span className="text-yellow-600 font-semibold">PENDING APPROVAL</span></div>
+                      <div><span className="font-medium">Status:</span> {
+                        requestStatus === 'pending' ? (
+                          <span className="text-yellow-600 font-semibold">PENDING APPROVAL</span>
+                        ) : requestStatus === 'borrowed' || requestStatus === 'approved' ? (
+                          <span className="text-green-600 font-semibold">APPROVED</span>
+                        ) : requestStatus === 'rejected' ? (
+                          <span className="text-red-600 font-semibold">REJECTED</span>
+                        ) : (
+                          <span className="text-yellow-600 font-semibold">PENDING APPROVAL</span>
+                        )
+                      }</div>
                     </div>
                   </div>
                   <div>
@@ -1279,43 +1361,75 @@ const BorrowRequestQR = ({ onClose }) => {
                   </div>
                 </div>
 
-                <div className="border-t border-gray-300 pt-4">
-                  <div className="grid grid-cols-2 gap-8">
-                    <div className="text-center">
-                      <div className="border-b border-gray-400 mb-2 pb-1">Staff Signature</div>
-                      <div className="text-xs text-gray-600">Approved by</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="border-b border-gray-400 mb-2 pb-1">Date Approved</div>
-                      <div className="text-xs text-gray-600">MM/DD/YYYY</div>
+                {/* Only show approval section when status is approved */}
+                {(requestStatus === 'borrowed' || requestStatus === 'approved') && (
+                  <div className="border-t border-gray-300 pt-4">
+                    <div className="grid grid-cols-2 gap-8">
+                      <div className="text-center">
+                        <div className="border-b border-gray-400 mb-2 pb-1">
+                          {submittedRequest.approved_by || 'Staff Signature'}
+                        </div>
+                        <div className="text-xs text-gray-600">Approved by</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="border-b border-gray-400 mb-2 pb-1">
+                          {submittedRequest.approved_at
+                            ? new Date(submittedRequest.approved_at).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+                            : new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+                          }
+                        </div>
+                        <div className="text-xs text-gray-600">Date Approved</div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
-                <div className="text-center mt-6 text-xs text-gray-500">
-                  <p>This claim slip must be presented to receive approved items.</p>
-                  <p>Keep this slip until items are returned.</p>
-                </div>
+                {/* Only show footer message when approved */}
+                {(requestStatus === 'borrowed' || requestStatus === 'approved') && (
+                  <div className="text-center mt-6 text-xs text-gray-500">
+                    <p>This claim slip must be presented to receive approved items.</p>
+                    <p>Keep this slip until items are returned.</p>
+                  </div>
+                )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex gap-4">
-                <button
-                  onClick={() => window.print()}
-                  className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
-                >
-                  <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
-                  </svg>
-                  Print Claim Slip
-                </button>
-                <button
-                  onClick={onClose}
-                  className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
+              {/* Action Buttons - Only show when status is approved or rejected */}
+              {(requestStatus === 'borrowed' || requestStatus === 'approved' || requestStatus === 'rejected') && (
+                <div className="flex gap-4">
+                  {/* Show Print Claim Slip button only when approved */}
+                  {(requestStatus === 'borrowed' || requestStatus === 'approved') && (
+                    <button
+                      onClick={() => window.print()}
+                      className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center"
+                    >
+                      <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clipRule="evenodd" />
+                      </svg>
+                      Print Claim Slip
+                    </button>
+                  )}
+                  {/* Show Close button for both approved and rejected */}
+                  <button
+                    onClick={onClose}
+                    className={`${(requestStatus === 'borrowed' || requestStatus === 'approved') ? 'flex-1' : 'w-full'} px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors`}
+                  >
+                    Close
+                  </button>
+                </div>
+              )}
+
+              {/* Show message when status is still pending */}
+              {requestStatus === 'pending' && (
+                <div className="text-center py-4">
+                  <div className="inline-flex items-center px-4 py-2 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <svg className="w-5 h-5 text-yellow-600 mr-2 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-yellow-800 font-medium">Waiting for admin approval...</span>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-2">Please check back later or refresh the page to see the updated status.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1327,8 +1441,8 @@ const BorrowRequestQR = ({ onClose }) => {
           notification.show ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
         }`}>
           <div className={`rounded-lg shadow-lg p-4 ${
-            notification.type === 'success' 
-              ? 'bg-green-50 border border-green-200' 
+            notification.type === 'success'
+              ? 'bg-green-50 border border-green-200'
               : notification.type === 'error'
               ? 'bg-red-50 border border-red-200'
               : 'bg-yellow-50 border border-yellow-200'
@@ -1353,8 +1467,8 @@ const BorrowRequestQR = ({ onClose }) => {
               </div>
               <div className="ml-3 flex-1">
                 <h3 className={`text-sm font-medium ${
-                  notification.type === 'success' 
-                    ? 'text-green-800' 
+                  notification.type === 'success'
+                    ? 'text-green-800'
                     : notification.type === 'error'
                     ? 'text-red-800'
                     : 'text-yellow-800'
@@ -1362,8 +1476,8 @@ const BorrowRequestQR = ({ onClose }) => {
                   {notification.title}
                 </h3>
                 <p className={`mt-1 text-sm ${
-                  notification.type === 'success' 
-                    ? 'text-green-700' 
+                  notification.type === 'success'
+                    ? 'text-green-700'
                     : notification.type === 'error'
                     ? 'text-red-700'
                     : 'text-yellow-700'
@@ -1375,8 +1489,8 @@ const BorrowRequestQR = ({ onClose }) => {
                 <button
                   onClick={() => setNotification(prev => ({ ...prev, show: false }))}
                   className={`inline-flex rounded-md p-1.5 hover:bg-opacity-75 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                    notification.type === 'success' 
-                      ? 'text-green-500 hover:bg-green-100 focus:ring-green-600' 
+                    notification.type === 'success'
+                      ? 'text-green-500 hover:bg-green-100 focus:ring-green-600'
                       : notification.type === 'error'
                       ? 'text-red-500 hover:bg-red-100 focus:ring-red-600'
                       : 'text-yellow-500 hover:bg-yellow-100 focus:ring-yellow-600'

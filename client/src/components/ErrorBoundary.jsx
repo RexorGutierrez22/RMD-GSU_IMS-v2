@@ -1,4 +1,5 @@
 import React from 'react';
+import { handleError } from '../utils/errorHandler';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -12,9 +13,14 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log the error to console for debugging
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
-    
+    // Use error handler for consistent error reporting
+    try {
+      handleError(error, `ErrorBoundary: ${this.props.name || 'Unknown Component'}`);
+    } catch (handlerError) {
+      // Fallback if error handler fails
+      console.error('ErrorBoundary caught an error:', error, errorInfo);
+    }
+
     this.setState({
       error: error,
       errorInfo: errorInfo

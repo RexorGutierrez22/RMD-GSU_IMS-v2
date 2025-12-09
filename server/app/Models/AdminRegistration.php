@@ -23,7 +23,11 @@ class AdminRegistration extends Model
         'rejection_reason',
         'approved_at',
         'rejected_at',
-        'approved_by'
+        'approved_by',
+        'email_verification_code',
+        'email_verified_at',
+        'verification_attempts',
+        'verification_code_expires_at'
     ];
 
     protected $hidden = [
@@ -33,6 +37,9 @@ class AdminRegistration extends Model
     protected $casts = [
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
+        'email_verified_at' => 'datetime',
+        'verification_code_expires_at' => 'datetime',
+        'verification_attempts' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime'
     ];

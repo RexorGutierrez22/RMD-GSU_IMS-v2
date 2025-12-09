@@ -13,24 +13,15 @@ const AdminLogin = () => {
 	const [error, setError] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
 
-	// Check if user is already authenticated
+	// Check if user is already authenticated (optimized - skip verification on login page)
 	useEffect(() => {
-		const checkAuth = async () => {
-			if (adminAuth.isAuthenticated()) {
-				// Try to verify the token
-				try {
-					await adminAuth.verifyToken();
-					// Redirect to intended page or dashboard
-					const from = location.state?.from?.pathname || '/admin-dashboard';
-					navigate(from, { replace: true });
-				} catch (error) {
-					console.error('Token verification failed:', error);
-					// Token is invalid, it's already removed by verifyToken method
-				}
-			}
-		};
-
-		checkAuth();
+		// Skip token verification on login page to improve performance
+		// Token will be verified when accessing protected routes
+		if (adminAuth.isAuthenticated()) {
+			// Simply redirect if token exists - verification happens on protected routes
+			const from = location.state?.from?.pathname || '/admin-dashboard';
+			navigate(from, { replace: true });
+		}
 	}, [navigate, location]);
 
 	const onChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
@@ -39,13 +30,13 @@ const AdminLogin = () => {
 		e.preventDefault();
 		setLoading(true);
 		setError('');
-		
+
 		try {
 			const response = await adminAuth.login({
 				email: form.username, // The username field will be used as email
 				password: form.password
 			});
-			
+
 			// Navigate to intended page or admin dashboard on successful login
 			const from = location.state?.from?.pathname || '/admin-dashboard';
 			navigate(from, { replace: true });
@@ -61,9 +52,9 @@ const AdminLogin = () => {
 			{/* Header */}
 			<div className="bg-red-700 h-16 w-full relative">
 				<div className="absolute right-4 top-2">
-					<img 
-						src="/Usep_logo.png" 
-						alt="USeP Logo" 
+					<img
+						src="/Usep_logo.png"
+						alt="USeP Logo"
 						className="h-12 w-12 bg-white rounded-full p-1"
 					/>
 				</div>
@@ -82,7 +73,7 @@ const AdminLogin = () => {
 
 						<div className="mb-8">
 							<h2 className="text-xl font-medium text-gray-700 mb-6">hello! Admin</h2>
-							
+
 							<form onSubmit={onSubmit} className="space-y-4">
 								<div>
 									<input

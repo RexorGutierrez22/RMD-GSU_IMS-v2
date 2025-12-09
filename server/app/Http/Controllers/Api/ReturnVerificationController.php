@@ -7,6 +7,8 @@ use App\Models\ReturnVerification;
 use App\Models\BorrowTransaction;
 use App\Models\ReturnTransaction;
 use App\Models\InventoryItem;
+use App\Models\BorrowRecord;
+use App\Models\ActivityLog;
 use App\Helpers\UserHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,22 +20,46 @@ class ReturnVerificationController extends Controller
 {
     /**
      * Get all pending verifications (Return Verification Lounge)
+     * Supports pagination with optional 'no_pagination' parameter for backward compatibility
      */
     public function getPendingVerifications(Request $request)
     {
         try {
-            Log::info('🔍 getPendingVerifications called');
+            Log::info('🔍 getPendingVerifications called', [
+                'page' => $request->get('page'),
+                'per_page' => $request->get('per_page'),
+                'no_pagination' => $request->get('no_pagination')
+            ]);
 
-            $verifications = ReturnVerification::with([
+            $query = ReturnVerification::with([
                 'borrowTransaction',
                 'inventoryItem',
                 'verifiedByUser'
             ])
             ->pendingVerification()
-            ->orderBy('created_at', 'desc')
-            ->get();
+            ->orderBy('created_at', 'desc');
 
-            Log::info('📦 Found pending verifications', ['count' => $verifications->count()]);
+            // Support backward compatibility: allow getting all records if requested
+            if ($request->has('no_pagination') && $request->get('no_pagination') == 'true') {
+                $verifications = $query->get();
+                Log::info('📦 Found pending verifications (no pagination)', ['count' => $verifications->count()]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Pending verifications retrieved successfully',
+                    'data' => $verifications
+                ]);
+            }
+
+            // Use pagination (default behavior)
+            $perPage = $request->get('per_page', 15); // Default 15 items per page
+            $verifications = $query->paginate($perPage);
+
+            Log::info('📦 Found pending verifications (paginated)', [
+                'total' => $verifications->total(),
+                'per_page' => $verifications->perPage(),
+                'current_page' => $verifications->currentPage()
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -96,10 +122,31 @@ class ReturnVerificationController extends Controller
                 $query->whereDate('created_at', '<=', $endDate);
             }
 
-            $verifications = $query->orderBy('created_at', 'desc')->get();
+            $query->orderBy('created_at', 'desc');
 
-            Log::info('✅ Found verifications', [
-                'count' => $verifications->count(),
+            // Support backward compatibility: allow getting all records if requested
+            if ($request->has('no_pagination') && $request->get('no_pagination') == 'true') {
+                $verifications = $query->get();
+                Log::info('✅ Found verifications (no pagination)', [
+                    'count' => $verifications->count(),
+                    'statuses' => $verifications->pluck('verification_status')->unique()
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Verifications retrieved successfully',
+                    'data' => $verifications
+                ]);
+            }
+
+            // Use pagination (default behavior)
+            $perPage = $request->get('per_page', 15); // Default 15 items per page
+            $verifications = $query->paginate($perPage);
+
+            Log::info('✅ Found verifications (paginated)', [
+                'total' => $verifications->total(),
+                'per_page' => $verifications->perPage(),
+                'current_page' => $verifications->currentPage(),
                 'statuses' => $verifications->pluck('verification_status')->unique()
             ]);
 
@@ -187,8 +234,9 @@ class ReturnVerificationController extends Controller
                     }
 
                     // Check if already verified or returned
-                    if ($borrowTransaction->status !== 'borrowed') {
-                        Log::warning('⚠️ Item not in borrowed status', [
+                    // Allow items with status 'borrowed' or 'pending_return_verification' to be returned again
+                    if ($borrowTransaction->status === 'returned' || $borrowTransaction->status === 'verified') {
+                        Log::warning('⚠️ Item already returned or verified', [
                             'transaction_id' => $borrowTransactionId,
                             'status' => $borrowTransaction->status
                         ]);
@@ -214,11 +262,26 @@ class ReturnVerificationController extends Controller
                         'verification_status' => 'pending_verification'
                     ]);
 
-                    // Update borrow transaction status to pending_return_verification
-                    $borrowTransaction->status = 'pending_return_verification';
-                    $borrowTransaction->save();
+                    // IMPORTANT: Keep status as 'borrowed' until admin verifies the return
+                    // This ensures the item remains visible in Borrowed Items page
+                    // Status will only change to 'returned' when admin verifies in Return Verification page
+                    // Do NOT change status here - it should remain 'borrowed'
 
                     $createdVerifications[] = $verification;
+
+                    // Log activity: Return submitted
+                    ActivityLog::log('return_submitted', "Return request submitted by {$verification->borrower_name} for {$borrowTransaction->inventoryItem->name}", [
+                        'category' => 'transaction',
+                        'borrow_transaction_id' => $borrowTransaction->id,
+                        'inventory_item_id' => $borrowTransaction->inventory_item_id,
+                        'actor_type' => $userType,
+                        'actor_id' => $user->id,
+                        'actor_name' => $verification->borrower_name,
+                        'metadata' => [
+                            'quantity' => $borrowTransaction->quantity,
+                            'return_date' => $verification->return_date->format('Y-m-d'),
+                        ],
+                    ]);
 
                     Log::info('✅ Return verification created', [
                         'verification_id' => $verification->verification_id,
@@ -287,7 +350,8 @@ class ReturnVerificationController extends Controller
                 ], 422);
             }
 
-            $verification = ReturnVerification::find($verificationId);
+            // Eager load relationships to avoid N+1 queries
+            $verification = ReturnVerification::with(['borrowTransaction'])->find($verificationId);
 
             if (!$verification) {
                 return response()->json([
@@ -324,15 +388,37 @@ class ReturnVerificationController extends Controller
                     'damage_fee' => 0
                 ]);
 
-                // Update borrow transaction status
+                // Update borrow transaction status and set actual return date
+                // Relationship already loaded via eager loading above
                 $borrowTransaction = $verification->borrowTransaction;
                 $borrowTransaction->status = 'returned';
+                $borrowTransaction->actual_return_date = $verification->return_date; // Set actual return date
                 $borrowTransaction->save();
 
-                // Restore inventory quantity
-                $inventoryItem = $verification->inventoryItem;
-                $inventoryItem->available_quantity += $verification->quantity_returned;
-                $inventoryItem->save();
+                // Remove from borrow_records (item is no longer actively borrowed)
+                BorrowRecord::where('borrow_transaction_id', $verification->borrow_transaction_id)
+                    ->delete();
+
+                // IMPORTANT: Do NOT restore inventory quantity here
+                // Quantity will be restored only after inspection in Returnee Item page
+                // This ensures items are examined first to determine if they're usable, damaged, or not usable
+                // Inventory restoration will happen during inspection process
+
+                // Log activity: Return verified
+                ActivityLog::log('return_verified', "Return verified for {$verification->borrower_name} - Item: {$verification->item_name}", [
+                    'category' => 'transaction',
+                    'borrow_transaction_id' => $verification->borrow_transaction_id,
+                    'return_transaction_id' => $returnTransaction->id,
+                    'inventory_item_id' => $verification->inventory_item_id,
+                    'admin_user_id' => $request->admin_user_id,
+                    'actor_type' => 'admin',
+                    'actor_id' => $request->admin_user_id,
+                    'actor_name' => 'Admin',
+                    'metadata' => [
+                        'quantity_returned' => $verification->quantity_returned,
+                        'return_date' => $verification->return_date->format('Y-m-d'),
+                    ],
+                ]);
 
                 DB::commit();
 
@@ -387,7 +473,8 @@ class ReturnVerificationController extends Controller
                 ], 422);
             }
 
-            $verification = ReturnVerification::find($verificationId);
+            // Eager load relationships to avoid N+1 queries
+            $verification = ReturnVerification::with(['borrowTransaction'])->find($verificationId);
 
             if (!$verification) {
                 return response()->json([
@@ -406,6 +493,7 @@ class ReturnVerificationController extends Controller
                 );
 
                 // Reset borrow transaction status back to borrowed
+                // Relationship already loaded via eager loading above
                 $borrowTransaction = $verification->borrowTransaction;
                 $borrowTransaction->status = 'borrowed';
                 $borrowTransaction->save();

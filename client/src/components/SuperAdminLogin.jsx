@@ -7,7 +7,7 @@ const SuperAdminLogin = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
     setLoginError('');
-    
+
     // Add your authentication logic here
     if (credentials.username === 'superadmin' && credentials.password === 'password') {
       // Successful login - redirect or update state
@@ -28,7 +28,7 @@ const SuperAdminLogin = () => {
             <div className="absolute inset-0 bg-gradient-to-r from-red-600/90 to-red-700/90"></div>
             <div className="absolute -top-4 -right-4 w-24 h-24 bg-white/10 rounded-full animate-pulse"></div>
             <div className="absolute -bottom-6 -left-6 w-32 h-32 bg-white/5 rounded-full animate-bounce"></div>
-            
+
             {/* Content */}
             <div className="relative z-10">
               <div className="mx-auto w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mb-4 transform transition-transform duration-300 hover:rotate-12">
@@ -82,6 +82,7 @@ const SuperAdminLogin = () => {
                     required
                     value={credentials.password}
                     onChange={(e) => setCredentials({...credentials, password: e.target.value})}
+                    autoComplete="current-password"
                     className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all duration-200 bg-gray-50 focus:bg-white text-gray-900 placeholder-gray-500"
                     placeholder="Enter your password"
                   />
