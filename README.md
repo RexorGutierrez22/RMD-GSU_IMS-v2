@@ -1,137 +1,253 @@
-# 🧪 RMD Inventory System (Docker Test Version)
+# 🧪 RMD-GSU Inventory Management System
 
-This is a **Dockerized test setup** for the Resource Management Division Inventory System. It includes:
-
-- Laravel API backend (`rmd-inventory-backend/`)
-- React Vite frontend (`rmd-inventory-frontend/`)
-- MySQL database
-- Docker-based development environment
+A comprehensive Inventory Management System for the Resource Management Division (RMD) at GSU, built with Laravel backend and React frontend.
 
 ---
 
 ## 🚀 Quick Start Guide
 
 ### Prerequisites
-- PHP 8.1+ with Composer
-- Node.js 18+ with npm
-- MySQL 8.0+ (or XAMPP)
-- Git
 
-### 1. 📥 Clone this repository
+Before you begin, ensure you have the following installed:
+
+- **PHP 8.1+** with Composer
+- **Node.js 18+** with npm
+- **MySQL 8.0+** (or XAMPP/WAMP)
+- **Git**
+
+---
+
+## 📥 Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/RexorGutierrez22/RMD-GSU_IMS.git
-cd RMD-GSU_IMS
+git clone https://github.com/RexorGutierrez22/RMD-GSU_IMS-v2.git
+cd RMD-GSU_IMS-v2
 ```
 
-### 2. 🔧 Backend Setup
+---
+
+## 🔧 Step 2: Backend Setup (Laravel)
+
+### 2.1 Install PHP Dependencies
 
 ```bash
 cd server
 composer install
+```
+
+### 2.2 Configure Environment
+
+```bash
+# Copy the example environment file
 cp .env.example .env
+
+# Generate application key
 php artisan key:generate
+```
+
+### 2.3 Configure Database
+
+1. **Create MySQL Database:**
+   ```sql
+   CREATE DATABASE rmd_inventory CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   ```
+
+2. **Update `.env` file** with your database credentials:
+   ```env
+   DB_CONNECTION=mysql
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_DATABASE=rmd_inventory
+   DB_USERNAME=root
+   DB_PASSWORD=your_password
+   ```
+
+### 2.4 Run Migrations
+
+```bash
 php artisan migrate
+php artisan db:seed
+```
+
+### 2.5 Start Backend Server
+
+```bash
 php artisan serve --port=8000
 ```
 
-### 3. 🎨 Frontend Setup
+The backend API will be available at: `http://localhost:8000`
+
+---
+
+## 🎨 Step 3: Frontend Setup (React)
+
+### 3.1 Install Node Dependencies
 
 ```bash
 cd client
 npm install
+```
+
+### 3.2 Configure Environment
+
+```bash
+# Copy the example environment file (if not exists)
+cp .env.example .env
+```
+
+**Update `client/.env`** to match your backend URL:
+```env
+VITE_API_URL=http://localhost:8000/api
+VITE_APP_NAME=RMD Inventory System
+```
+
+### 3.3 Start Frontend Development Server
+
+```bash
 npm run dev
 ```
 
-The system will be available at:
-- Frontend: [http://localhost:3010](http://localhost:3010)
-- Backend API: [http://localhost:8000](http://localhost:8000)
+The frontend will be available at: `http://localhost:5173` (or the port shown in terminal)
 
-### 4. 📊 Database Setup
+---
 
-Ensure MySQL is running and create the database:
-```sql
-CREATE DATABASE rmd_inventory CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+## ✅ Step 4: Verify Installation
+
+1. **Backend API Test:**
+   - Open: `http://localhost:8000/api/test`
+   - Should return: `{"message":"API is working!"}`
+
+2. **Frontend:**
+   - Open: `http://localhost:5173`
+   - Should see the landing page
+
+---
+
+## 🔑 Default Credentials
+
+### Super Admin
+- **Username:** `superadmin@usep.edu.ph`
+- **Password:** Check with your team lead
+
+### Admin/Staff
+- **Username:** `RMD_Staff` or `Rexor22`
+- **Password:** `rmd@admin`
+
+> ⚠️ **Important:** Change default passwords in production!
+
+---
+
+## 📁 Project Structure
+
 ```
-
-Then run migrations:
-```bash
-cd server
-php artisan migrate
+RMD-GSU_IMS-v2/
+├── server/                 # Laravel Backend
+│   ├── app/               # Application logic
+│   ├── database/          # Migrations & Seeders
+│   ├── routes/            # API routes
+│   └── config/            # Configuration files
+│
+├── client/                # React Frontend
+│   ├── src/               # Source code
+│   ├── public/            # Static assets
+│   └── package.json       # Dependencies
+│
+└── docs/                  # Documentation
 ```
 
 ---
 
-## 📦 Folder Structure
+## 🛠️ Common Issues & Solutions
 
-```
-RMD-GSU_IMS/
-├── rmd-inventory-backend/     # Laravel API
-│   ├── app/
-│   ├── routes/
-│   ├── database/
-│   └── Dockerfile
-├── rmd-inventory-frontend/    # React (Vite)
-│   ├── src/
-│   ├── public/
-│   └── Dockerfile
-├── docker-compose.yml
-└── README.md
-```
+### Backend Issues
+
+**Problem:** `SQLSTATE[HY000] [2002] Connection refused`
+- **Solution:** Ensure MySQL is running (XAMPP Control Panel)
+
+**Problem:** `Class 'PDO' not found`
+- **Solution:** Install PHP PDO extension: `sudo apt-get install php-pdo`
+
+**Problem:** `500 Internal Server Error`
+- **Solution:** Check `.env` file exists and has correct database credentials
+
+### Frontend Issues
+
+**Problem:** `Cannot connect to API`
+- **Solution:** 
+  1. Ensure backend is running on port 8000
+  2. Check `client/.env` has correct `VITE_API_URL`
+  3. Restart frontend dev server after changing `.env`
+
+**Problem:** `Module not found` errors
+- **Solution:** Run `npm install` again in `client/` directory
 
 ---
 
-## ⚙️ Environment Configuration
+## 📧 Email Configuration (Optional)
 
-### Backend Configuration (.env)
+To enable email notifications, update `server/.env`:
+
 ```env
-APP_NAME=Laravel
-APP_ENV=local
-APP_DEBUG=true
-APP_URL=http://localhost:8000
-
-DB_CONNECTION=mysql
-DB_HOST=mysql
-DB_PORT=3306
-DB_DATABASE=rmd_inventory
-DB_USERNAME=laravel
-DB_PASSWORD=laravel
-```
-
-### CORS Configuration (config/cors.php)
-```php
-'paths' => ['api/*', 'sanctum/csrf-cookie'],
-'allowed_origins' => ['http://localhost:3000'],
-'allowed_methods' => ['*'],
-'allowed_headers' => ['*'],
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=your_email@gmail.com
+MAIL_PASSWORD=your_app_password
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@usep.edu.ph
+MAIL_FROM_NAME="${APP_NAME}"
 ```
 
 ---
 
-## 🛠 Development Notes
+## 🔄 Updating the Code
 
-- Make sure Docker Desktop is running before starting the system
-- All services run in isolated containers:
-  - Backend: PHP 8.2 with Laravel
-  - Frontend: Node.js with React + Vite
-  - Database: MySQL 8.0
-- No need to install PHP, Node.js, or MySQL locally
-- API endpoints are accessible at `http://localhost:8000/api`
-- Frontend dev server runs at `http://localhost:3010`
+When pulling latest changes:
 
-### Available API Endpoints
+```bash
+# Backend
+cd server
+composer install
+php artisan migrate
 
-- POST `/api/login` - User authentication
-- POST `/api/logout` - User logout (requires auth)
-- GET `/api/inventory` - Get inventory items
-- POST `/api/transactions/borrow` - Create borrow request
-- And many more...
+# Frontend
+cd client
+npm install
+```
 
 ---
 
-## ⚠️ Important Reminders
+## 📚 Additional Documentation
 
-- Always check logs if services aren't responding
-- Use `docker-compose down` to stop all services
-- Use `docker-compose up -d` for detached mode
-- Check `EMAIL-TESTING.md` for email notification setup
+- **Email Setup:** See `EMAIL-TESTING.md`
+- **Cleanup Summary:** See `CLEANUP_SUMMARY.md`
+- **Archived Docs:** See `docs/ARCHIVE/`
+
+---
+
+## 🤝 Contributing
+
+1. Create a feature branch: `git checkout -b feature/your-feature`
+2. Make your changes
+3. Commit: `git commit -m "Add your feature"`
+4. Push: `git push origin feature/your-feature`
+5. Create a Pull Request
+
+---
+
+## 📝 License
+
+This project is for internal use by RMD-GSU.
+
+---
+
+## 🆘 Need Help?
+
+- Check the troubleshooting section above
+- Review documentation in `docs/` folder
+- Contact your team lead
+
+---
+
+**Happy Coding! 🚀**
+
